@@ -6,7 +6,7 @@ Salute to Cedrick Collomb's famous tool - unlocker.
 
 ## Advantanges
 
-* support operations on reserved name file ([what is reserved name](`https://msdn.microsoft.com/en-us/aa365247(VS.85).aspx))
+* support operations on reserved name file ([what is reserved name](https://msdn.microsoft.com/en-us/aa365247(VS.85).aspx))
 * quick scan improvement
     *  hang-up handle check without creating a mount of threads ([Robert Simpson's answer on stackoverflow.com](http://stackoverflow.com/questions/16127948/hang-on-ntquerysysteminformation-in-winxpx32-but-works-fine-in-win7x64))
 * support detection of opened memory-mapping-file (abbr as mmf) handle and map view of mmf
