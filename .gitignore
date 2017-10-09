@@ -30,3 +30,13 @@
 *.exe
 *.out
 *.app
+
+# Log
+*.log
+
+# Temporary Solution Files
+*.ipch
+*.sdf
+*.opensdf
+*.user
+*.suo
