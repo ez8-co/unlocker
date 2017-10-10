@@ -26,9 +26,9 @@ Salute to Cedrick Collomb's famous tool - unlocker.
 
 File Type |Method | Unlock Solution
 ---|---|---
-* | CreateFile | RemoteCloseHandle
-* | CreateFileMapping | RemoteCloseHandle
-* | MapViewOfFile | RemoteUnmapViewOfFile
+\* | CreateFile | RemoteCloseHandle
+\* | CreateFileMapping | RemoteCloseHandle
+\* | MapViewOfFile | RemoteUnmapViewOfFile
 exe | CreateProcess | TerminateProcess
 dll | LoadLibrary | RemoteFreeLibrary
 sys | CreateService/StartService | StopService/DeleteService
