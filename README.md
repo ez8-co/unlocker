@@ -6,23 +6,27 @@ Salute to Cedrick Collomb's famous tool - unlocker.
 
 ## Advantanges
 
-* **[UNIQUE] support operations on unacceptable-name files** ([reserved names or name ends with a period or a space](https://msdn.microsoft.com/en-us/aa365247(VS.85).aspx#naming_conventions))
-* **[UNIQUE] support detection of opened memory-mapping-file (abbr as mmf) handle and map view of mmf**
+- [x] **[UNIQUE] support operations on unacceptable-name files** ([reserved names or name ends with a period or a space](https://msdn.microsoft.com/en-us/aa365247(VS.85).aspx#naming_conventions))
+- [x] **[UNIQUE] support detection of opened memory-mapping-file (abbr as mmf) handle and map view of mmf**
 	* MS Office compatible mode (e.g. \*.doc, \*.xls, \*.ppt opened by MS Office 2007+)
-	* file copy by explorer.exe
-	* etc.
-* low resource comsuption & quick scan improvement
+	* file copy by Windows Explorer
+	* other scenarios
+- [x] low resource comsuption & quick scan improvement
     * hang-up handle check without creating a mount of threads ([Robert Simpson's answer at stackoverflow.com](http://stackoverflow.com/questions/16127948/hang-on-ntquerysysteminformation-in-winxpx32-but-works-fine-in-win7x64))
-* support operating files in UNC/Network drive
-* [:cross mark:] support terminate some of the protected Ring3 processes
-* [:cross mark:] support all version of Visual C++ or Visual Studio (both UNICODE & non-UNICODE projects)
-* [:cross mark:] support all version of OSs
+- [x] support operating files in UNC/Network drive
+- [ ] support terminate some of the protected Ring3 processes
+- [ ] support all version of Visual C++ or Visual Studio (both UNICODE & non-UNICODE projects)
+- [ ] support all version of Windows OS
 
 ## How it works?
 
 #### Type of files
-- Normal files: text files, image files, binary files and etc.
-- Executable files: exe, dll, sys
+- Non-executable files:
+    - \*.txt, \*.jpg, \*.mp3, \*.zip, \*.doc, etc.
+- Executable files:
+    - **\*.exe** - (Portable Executable / MS-DOS MZ executable)
+    - **\*.dll** - (Dynamic-Linked Library / COM Object)
+    - **\*.sys** - (Driver)
 
 File Type |Method | Unlock Solution
 ---|---|---
@@ -41,7 +45,8 @@ sys | CreateService/StartService | StopService/DeleteService
 ## References
 Thanks to following projects, in no particular order
 
-* [宇文莺语 (wang huan)](https://code.csdn.net/snippets/713440/)
+* [ncFindFileHandle.cpp @ 宇文莺语 (wang huan)](https://code.csdn.net/snippets/713440/)
+* [vmmap @ twpol](https://github.com/twpol/vmmap)
 
 ## About author
 
