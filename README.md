@@ -1,12 +1,12 @@
 # What is unlocker?
 
-A head-only, fast, simple Ring3 unlocker library. 
+A header-only, fast, simple Ring3 unlocker library. 
 
 Salute to Cedrick Collomb's famous tool - unlocker.
 
 ## Advantanges
 
-- [x] **[UNIQUE] support operations on unacceptable-name files** ([reserved names or name ends with a period or a space](https://msdn.microsoft.com/en-us/aa365247(VS.85).aspx#naming_conventions))
+- [ ] **[UNIQUE] support operations on unacceptable-name files** ([reserved names or name ends with a period or a space](https://msdn.microsoft.com/en-us/aa365247(VS.85).aspx#naming_conventions))
 - [x] **[UNIQUE] support detection of opened memory-mapping-file (abbr as mmf) handle and map view of mmf**
 	* MS Office compatible mode (e.g. \*.doc, \*.xls, \*.ppt opened by MS Office 2007+)
 	* file copy by Windows Explorer
