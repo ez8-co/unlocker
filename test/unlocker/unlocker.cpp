@@ -7,12 +7,12 @@
 // main
 int _tmain(int argc, _TCHAR* argv[])
 {
-	SetPrivilege(SE_DEBUG_NAME, TRUE);
+	unlocker::SetPrivilege(SE_DEBUG_NAME, TRUE);
 
 	tstring path (_T("f:\\a.xls"));
-	UnholdFile(path);
+	unlocker::UnholdFile(path);
 
-	SetPrivilege(SE_DEBUG_NAME, FALSE);
+	unlocker::SetPrivilege(SE_DEBUG_NAME, FALSE);
 	system("pause");
 	return 0;
 }

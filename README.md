@@ -1,5 +1,7 @@
 # What is unlocker?
 
+[![license](https://img.shields.io/badge/license-MIT-brightgreen.svg?style=flat)](https://github.com/ez8-co/unlocker/blob/master/LICENSE)
+
 A header-only, fast, simple Ring3 unlocker library. 
 
 Salute to Cedrick Collomb's famous tool - unlocker.
