@@ -4,6 +4,8 @@
 
 #include "..\..\unlocker.hpp"
 
+#include <cstdlib>
+
 // main
 int _tmain(int argc, _TCHAR* argv[])
 {
