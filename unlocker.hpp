@@ -1,23 +1,10 @@
 /*
-Copyright (c) 2010-2017 <http://ez8.co> <orca.zhang@yahoo.com>
+  unlocker -- A header-only, fast, simple unlocker library under Ring3 for Windows.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+  Copyright (c) 2010-2017 <http://ez8.co> <orca.zhang@yahoo.com>
+  This library is released under the MIT License.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+  Please see LICENSE file or visit https://github.com/ez8-co/unlocker for details.
 */
 #pragma once
 
@@ -34,17 +21,61 @@ typedef std::basic_string<TCHAR, std::char_traits<TCHAR>, std::allocator<TCHAR> 
 #include <psapi.h>
 #pragma comment(lib, "psapi.lib")
 
-#define STATUS_SUCCESS						((NTSTATUS)0x00000000L)
-#define STATUS_INFO_LENGTH_MISMATCH			((NTSTATUS)0xC0000004L)
-#define STATUS_BUFFER_OVERFLOW				((NTSTATUS)0x80000005L)
+#define STATUS_SUCCESS				((NTSTATUS)0x00000000L)
+#define STATUS_INFO_LENGTH_MISMATCH	((NTSTATUS)0xC0000004L)
+#define STATUS_BUFFER_OVERFLOW		((NTSTATUS)0x80000005L)
 
 #ifndef NT_SUCCESS
-#define NT_SUCCESS(Status) (((NTSTATUS)(Status)) >= 0)
+#define NT_SUCCESS(Status)			(((NTSTATUS)(Status)) >= 0)
 #endif
 
 namespace unlocker {
 
-	// SmartHandle
+	class Path : public tstring
+	{
+	public:
+		Path& Append(const tstring& path) {
+			tstring::size_type pos = path.find_first_not_of('\\');
+			if(pos != tstring::npos) {
+				*this += '\\';
+				this->append(path, pos, path.length() - pos);
+			}
+		}
+		operator tstring() const { return *this; }
+		operator const TCHAR*() const { return &(*this[0]); }
+
+		static BOOL Contains(const tstring& path, const tstring& sub_path)
+		{
+			return path.length() <= sub_path.length()
+				&& !_tcsnicmp(path.c_str(), sub_path.c_str(), path.length())
+				&& (path.length() == sub_path.length() || path[path.length() - 1] == '\\' || sub_path[path.length()] == '\\');
+		}
+	};
+
+	class File
+	{
+	public:
+		File(const Path& path);
+		virtual BOOL FindLockers();
+		virtual BOOL Unlock();
+		virtual BOOL ForceDelete();
+		virtual BOOL Delete();
+	};
+
+	class Dir : public File
+	{
+	public:
+		Dir(const Path& path);
+		virtual BOOL FindLockers();
+		virtual BOOL Unlock();
+		virtual BOOL ForceDelete();
+		virtual BOOL Delete();
+
+	private:
+		void List(vector<Path>& subs);
+		BOOL Remove();
+	};
+	
 	class SmartHandle
 	{
 		SmartHandle(const SmartHandle&);
@@ -57,10 +88,10 @@ namespace unlocker {
 		}
 
 		operator HANDLE() const {return _handle;}
-		PHANDLE  operator&() {return &_handle;}
-		void operator=(HANDLE handle) {
+		PHANDLE operator&() {return &_handle;}
+		HANDLE operator=(HANDLE handle) {
 			if (_handle) CloseHandle(_handle);
-			_handle = handle;
+			return _handle = handle;
 		}
 
 	private:
@@ -75,13 +106,11 @@ namespace unlocker {
 		if (!LookupPrivilegeValue(NULL, lpszPrivilege, &luid)) return FALSE;
 		TOKEN_PRIVILEGES tp = {1, {luid, bEnablePrivilege ? SE_PRIVILEGE_ENABLED : 0}};
 		AdjustTokenPrivileges(hToken, FALSE, &tp, 0, (PTOKEN_PRIVILEGES) NULL, 0); 
-		return ((GetLastError() != ERROR_SUCCESS) ? FALSE : TRUE);
+		return (GetLastError() == ERROR_SUCCESS);
 	}
 
-	namespace detail {
-		// NTQUERYOBJECT
-		typedef struct _UNICODE_STRING
-		{
+	namespace {
+		typedef struct _UNICODE_STRING {
 			WORD  Length;
 			WORD  MaximumLength;
 			PWSTR Buffer;
@@ -103,7 +132,7 @@ namespace unlocker {
 
 		typedef struct _OBJECT_TYPE_INFORMATION {
 			UNICODE_STRING Name;
-			// ommit other members
+			// omit unused members
 		} OBJECT_TYPE_INFORMATION, *POBJECT_TYPE_INFORMATION;
 
 		typedef NTSTATUS (WINAPI *NTQUERYOBJECT)(
@@ -113,7 +142,6 @@ namespace unlocker {
 			_In_ ULONG ObjectInformationLength,
 			_Out_opt_ PULONG ReturnLength);
 
-		// NTQUERYSYSTEMINFORMATION
 		typedef struct _SYSTEM_HANDLE {
 			DWORD dwProcessId;
 			BYTE bObjectType;
@@ -152,8 +180,8 @@ namespace unlocker {
 
 		typedef NTSTATUS (WINAPI *NTQUERYSYSTEMINFORMATION)(
 			IN SYSTEM_INFORMATION_CLASS SystemInformationClass,
-			OUT PVOID SystemInformation,
-			IN ULONG SystemInformationLength,
+			OUT PVOID  SystemInformation,
+			IN ULONG   SystemInformationLength,
 			OUT PULONG ReturnLength OPTIONAL);
 
 		typedef enum _SECTION_INFORMATION_CLASS {
@@ -175,8 +203,8 @@ namespace unlocker {
 
 		typedef NTSTATUS (WINAPI *NTQUERYSYSTEMINFORMATION)(
 			IN SYSTEM_INFORMATION_CLASS SystemInformationClass,
-			OUT PVOID SystemInformation,
-			IN ULONG SystemInformationLength,
+			OUT PVOID  SystemInformation,
+			IN ULONG   SystemInformationLength,
 			OUT PULONG ReturnLength OPTIONAL);
 
 		static NTQUERYSYSTEMINFORMATION NtQuerySystemInformation = (NTQUERYSYSTEMINFORMATION)GetProcAddress(GetModuleHandle (_T("ntdll")), "NtQuerySystemInformation");
@@ -189,7 +217,6 @@ namespace unlocker {
 			vector<HANDLE> mmfSections;
 		} HOLDER_INFO;
 
-		// GetDeviceDriveMap
 		void GetDeviceDriveMap(map<tstring, tstring>& pathMapping)
 		{
 			DWORD driveMask = GetLogicalDrives();
@@ -221,7 +248,6 @@ namespace unlocker {
 			}
 		}
 
-		// DevicePathToDrivePath
 		BOOL DevicePathToDrivePath(tstring& path)
 		{
 			static map<tstring, tstring> pathMapping;
@@ -248,7 +274,6 @@ namespace unlocker {
 			return FALSE;
 		}
 
-		// GetHandlePath
 		BOOL GetHandlePath(HANDLE handle, tstring& path)
 		{
 			if (!NtQueryObject) return FALSE;
@@ -279,25 +304,25 @@ namespace unlocker {
 			return bRet;
 		}
 
-		// GetSystemHandleInfo
-		PSYSTEM_HANDLE_INFORMATION_EX GetSystemHandleInfo()
+		template<typename SYS_HADNLE_INFO_TYPE, SYSTEM_INFORMATION_CLASS sys_info_class>
+		SYS_HADNLE_INFO_TYPE* GetSystemHandleInfo()
 		{
 			if (!NtQuerySystemInformation) return NULL;
 
 			DWORD dwLength = 0;
-			SYSTEM_HANDLE_INFORMATION_EX shi = {0};
-			NTSTATUS status = NtQuerySystemInformation(SystemHandleInformationEx, &shi, sizeof (shi), &dwLength);
+			SYS_HADNLE_INFO_TYPE shi = {0};
+			NTSTATUS status = NtQuerySystemInformation(sys_info_class, &shi, sizeof (shi), &dwLength);
 			if (status != STATUS_SUCCESS && status != STATUS_BUFFER_OVERFLOW && status != STATUS_INFO_LENGTH_MISMATCH) {
 				return NULL;
 			}
 
-			PSYSTEM_HANDLE_INFORMATION_EX pshi = (PSYSTEM_HANDLE_INFORMATION_EX)malloc(dwLength);
+			SYS_HADNLE_INFO_TYPE* pshi = (SYS_HADNLE_INFO_TYPE*)malloc(dwLength);
 			while (true) {
-				status = NtQuerySystemInformation (SystemHandleInformationEx, pshi, dwLength, &dwLength);
+				status = NtQuerySystemInformation (sys_info_class, pshi, dwLength, &dwLength);
 				if (status != STATUS_BUFFER_OVERFLOW && status != STATUS_INFO_LENGTH_MISMATCH) {
 					break;
 				}
-				pshi = (PSYSTEM_HANDLE_INFORMATION_EX)realloc(pshi, dwLength);
+				pshi = (SYS_HADNLE_INFO_TYPE*)realloc(pshi, dwLength);
 			}
 
 			if (!NT_SUCCESS (status)) {
@@ -318,13 +343,14 @@ namespace unlocker {
 		}
 
 		// FindFileHandleHolders
+		template<typename SYS_HADNLE_INFO_TYPE, SYSTEM_INFORMATION_CLASS sys_info_class>
 		BOOL FindFileHandleHolders(LPCTSTR path, map<DWORD, HOLDER_INFO>& holders)
 		{
 			holders.clear ();
 
 			if (!path || !NtQueryObject || !NtQuerySection) return FALSE;
 
-			PSYSTEM_HANDLE_INFORMATION_EX pshi = GetSystemHandleInfo ();
+			SYS_HADNLE_INFO_TYPE* pshi = GetSystemHandleInfo<SYS_HADNLE_INFO_TYPE, sys_info_class> ();
 			if (!pshi) return FALSE;
 
 			HANDLE hCrtProc = GetCurrentProcess ();
@@ -332,14 +358,12 @@ namespace unlocker {
 				// duplicate handle
 				SmartHandle hDupHandle;
 				SmartHandle hProcess = OpenProcess(PROCESS_DUP_HANDLE, FALSE, (DWORD)pshi->Handles[i].ProcessId);
-				if (!hProcess || !DuplicateHandle(hProcess, pshi->Handles[i].Handle, hCrtProc, &hDupHandle, 0, FALSE, DUPLICATE_SAME_ACCESS)) {
+				if (!hProcess || !DuplicateHandle(hProcess, pshi->Handles[i].Handle, hCrtProc, &hDupHandle, 0, FALSE, DUPLICATE_SAME_ACCESS))
 					continue;
-				}
 
 				// filter out device handle (some of them may cause NtQueryObject hang up, e.g. some pipe handle)
-				if (IsDeviceHandle(hDupHandle)) {
+				if (IsDeviceHandle(hDupHandle))
 					continue;
-				}
 
 				// filter out non-file or non-section handle (identify by ObjectIndex is not correct)
 				POBJECT_TYPE_INFORMATION poti = (POBJECT_TYPE_INFORMATION)malloc(0x1000);
@@ -347,23 +371,13 @@ namespace unlocker {
 				if (NT_SUCCESS(status)) {
 					if (!_wcsicmp(poti->Name.Buffer, L"File")) {
 						tstring filePath;
-						if (GetHandlePath(hDupHandle, filePath) && !_tcsicmp(filePath.c_str(), path)) {
+						if (GetHandlePath(hDupHandle, filePath) && Path::Contains(path, filePath.c_str()))
 							holders[(DWORD)pshi->Handles[i].ProcessId].openHandles.push_back(pshi->Handles[i].Handle);
-						}
 					}
 					else if (!_wcsicmp(poti->Name.Buffer, L"Section")) {
 						SECTION_BASIC_INFORMATION sbi = {};
-						NTSTATUS status = NtQuerySection(hDupHandle, SectionBasicInformation, &sbi, sizeof(sbi), 0);
-						if (NT_SUCCESS(status)){
-							if (sbi.SectionAttributes != SEC_FILE) {
-								continue;
-							}
+						if (NT_SUCCESS(NtQuerySection(hDupHandle, SectionBasicInformation, &sbi, sizeof(sbi), 0)) && sbi.SectionAttributes == SEC_FILE)
 							holders[(DWORD)pshi->Handles[i].ProcessId].mmfSections.push_back(pshi->Handles[i].Handle);
-						}
-					}
-					else {
-						free(poti);
-						continue;
 					}
 				}
 				free(poti);
@@ -386,9 +400,8 @@ namespace unlocker {
 			SmartHandle hProcess = OpenProcess(PROCESS_DUP_HANDLE, FALSE, dwProcessId);
 			if (hProcess) {
 				SmartHandle hDup;
-				if (DuplicateHandle(hProcess, hHandle, GetCurrentProcess(), &hDup, DUPLICATE_SAME_ACCESS, FALSE, DUPLICATE_CLOSE_SOURCE) && hDup) {
+				if (DuplicateHandle(hProcess, hHandle, GetCurrentProcess(), &hDup, DUPLICATE_SAME_ACCESS, FALSE, DUPLICATE_CLOSE_SOURCE) && hDup)
 					return TRUE;
-				}
 			}
 			return FALSE;
 		}
@@ -440,7 +453,7 @@ namespace unlocker {
 			return (dwRet == ERROR_SUCCESS);
 		}
 
-		BOOL CloseMapViewOfFile(HANDLE hProcess, LPCTSTR filePath)
+		BOOL CloseMapViewOfFile(HANDLE hProcess, LPCTSTR path)
 		{
 			BOOL isWow64 = FALSE;
 			IsWow64Process(hProcess, &isWow64);
@@ -463,11 +476,9 @@ namespace unlocker {
 						tstring filepath(MAX_PATH, '\0');
 						filepath.resize(GetMappedFileName(hProcess, mbi.BaseAddress, &filepath[0], filepath.size()));
 						DevicePathToDrivePath(filepath);
-						if (!filepath.empty()) {
-							if (!_tcsicmp(filePath, filepath.c_str())) {
-								RemoteUnmapViewOfFile(hProcess, mbi.BaseAddress);
-								found = TRUE;
-							}
+						if (!filepath.empty() && Path::Contains(path, filepath.c_str())) {
+							RemoteUnmapViewOfFile(hProcess, mbi.BaseAddress);
+							found = TRUE;
 						}
 					}
 					mbiLast = mbi;
@@ -479,39 +490,37 @@ namespace unlocker {
 
 	void UnholdFile(const tstring& path)
 	{
-		map<DWORD, detail::HOLDER_INFO> holders;
-		if (detail::FindFileHandleHolders(path.c_str(), holders)) {
-			for (map<DWORD, detail::HOLDER_INFO>::const_iterator it=holders.begin(); it!=holders.end(); ++it) {
+		map<DWORD, HOLDER_INFO> holders;
+		if (FindFileHandleHolders<SYSTEM_HANDLE_INFORMATION_EX, SystemHandleInformationEx>(path.c_str(), holders)) {
+			for (map<DWORD, HOLDER_INFO>::const_iterator it=holders.begin(); it!=holders.end(); ++it) {
 				SmartHandle hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, it->first);
 				tstring holderPath(MAX_PATH, '\0');
 				holderPath.resize(GetProcessImageFileName(hProcess, &holderPath[0], holderPath.size()));
-				detail::DevicePathToDrivePath(holderPath);
-				if (detail::CloseMapViewOfFile(hProcess, path.c_str())) {
+				DevicePathToDrivePath(holderPath);
+				if (CloseMapViewOfFile(hProcess, path.c_str())) {
 					// check memory-mapping file handle in mmfSections
 					for (vector<HANDLE>::const_iterator i=it->second.mmfSections.begin(); i!=it->second.mmfSections.end(); ++i) {
 						SmartHandle hDupHandle;
-						if (!DuplicateHandle(hProcess, *i, GetCurrentProcess(), &hDupHandle, 0, FALSE, DUPLICATE_SAME_ACCESS)) {
+						if (!DuplicateHandle(hProcess, *i, GetCurrentProcess(), &hDupHandle, 0, FALSE, DUPLICATE_SAME_ACCESS))
 							continue;
-						}
 						// try MapViewOfFile on Handle
 						LPVOID p = MapViewOfFile(hDupHandle, FILE_MAP_READ, 0, 0, 1);
 						if (!p)
 							continue;
-						if (detail::CloseMapViewOfFile(GetCurrentProcess(), path.c_str())) {
+						if (CloseMapViewOfFile(GetCurrentProcess(), path.c_str())) {
 							// if specific file occurred, close this handle
 							tstring mmfPath;
-							detail::GetHandlePath(hDupHandle, mmfPath);
-							BOOL b = detail::CloseHandleWithProcess(it->first, *i);//CloseRemoteHandle(hProcess, *i);
+							GetHandlePath(hDupHandle, mmfPath);
+							BOOL b = CloseHandleWithProcess(it->first, *i);//CloseRemoteHandle(hProcess, *i);
 							_tprintf_s(_T("%s [%u](0x%X) <mmf:%s> %s\n"), b ? _T("OK") : _T("FAIL"), it->first, *i, mmfPath.c_str(), holderPath.c_str());
 						}
-						else {
+						else
 							// UnmapViewOfFile
 							UnmapViewOfFile(p);
-						}
 					}
 				}
 				for (vector<HANDLE>::const_iterator i=it->second.openHandles.begin(); i!=it->second.openHandles.end(); ++i) {
-					BOOL b = detail::CloseHandleWithProcess(it->first, *i);//CloseRemoteHandle(hProcess, *i);
+					BOOL b = CloseHandleWithProcess(it->first, *i);//CloseRemoteHandle(hProcess, *i);
 					_tprintf_s(_T("%s [%u](0x%X) %s\n"), b ? _T("OK") : _T("FAIL"), it->first, *i, holderPath.c_str());
 				}
 			}
