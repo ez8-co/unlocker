@@ -11,8 +11,11 @@ int _tmain(int argc, _TCHAR* argv[])
 {
 	unlocker::SetPrivilege(SE_DEBUG_NAME, TRUE);
 
-	tstring path (_T("f:\\a.xls"));
-	unlocker::UnholdFile(path);
+	unlocker::File* file = unlocker::Path::Exists(_T("f:\\a.xls"));
+	if (file) {
+		file->ForceDelete();
+		delete file;
+	}
 
 	unlocker::SetPrivilege(SE_DEBUG_NAME, FALSE);
 	system("pause");
