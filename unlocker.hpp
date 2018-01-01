@@ -303,7 +303,6 @@ namespace unlocker {
 		typedef struct _HOLDER_INFO {
 			vector<HANDLE> openHandles;
 			vector<HANDLE> mmfSections;
-			vector<HANDLE> processHandles;
 		} HOLDER_INFO;
 
 		void GetDeviceDriveMap(map<tstring, tstring>& pathMapping)
@@ -467,13 +466,6 @@ namespace unlocker {
 						SECTION_BASIC_INFORMATION sbi = {};
 						if (NT_SUCCESS(NtQuerySection(hDupHandle, SectionBasicInformation, &sbi, sizeof(sbi), 0)) && sbi.SectionAttributes == SEC_FILE)
 							holders[(DWORD)pshi->Handles[i].ProcessId].mmfSections.push_back((HANDLE)pshi->Handles[i].Handle);
-					}
-					else if (!_wcsicmp(poti->Name.Buffer, L"Process")) {
-						tstring filePath(MAX_PATH, '\0');
-						filePath.resize(GetProcessImageFileName((HANDLE)pshi->Handles[i].Handle, &filePath[0], filePath.size()));
-						DevicePathToDrivePath(filePath);
-						if (Path::Contains(path, filePath.c_str()))
-							holders[(DWORD)pshi->Handles[i].ProcessId].processHandles.push_back((HANDLE)pshi->Handles[i].Handle);
 					}
 				}
 				free(poti);
