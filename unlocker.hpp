@@ -122,10 +122,7 @@ namespace unlocker {
 			return UnholdFile(_path);
 		}
 		virtual BOOL ForceDelete() {
-			if(Delete())
-				return TRUE;
-			Unlock();
-			return Delete();
+			return Delete() || Unlock() || Delete();
 		}
 		virtual BOOL Delete() {
 			SetFileAttributes(_path, FILE_ATTRIBUTE_NORMAL);
