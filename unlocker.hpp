@@ -11,9 +11,8 @@
 #include <tchar.h>
 #include <windows.h>
 
-#include <vector>
+#include <deque>
 #include <map>
-#include <list>
 using namespace std;
 
 #include <string>
@@ -22,12 +21,35 @@ typedef std::basic_string<TCHAR, std::char_traits<TCHAR>, std::allocator<TCHAR> 
 #include <psapi.h>
 #pragma comment(lib, "psapi.lib")
 
+#include <TlHelp32.h>
+
 #define STATUS_SUCCESS				((NTSTATUS)0x00000000L)
 #define STATUS_INFO_LENGTH_MISMATCH	((NTSTATUS)0xC0000004L)
 #define STATUS_BUFFER_OVERFLOW		((NTSTATUS)0x80000005L)
 
 #ifndef NT_SUCCESS
 #define NT_SUCCESS(Status)			(((NTSTATUS)(Status)) >= 0)
+#endif
+
+#ifndef _WIN64
+template <class T>
+struct _UNICODE_STRING_T
+{
+	union
+	{
+		struct
+		{
+			WORD Length;
+			WORD MaximumLength;
+		};
+		T dummy;
+	};
+	T Buffer;
+};
+extern "C" DWORD64 __cdecl X64Call(DWORD64 func, int argC, ...);
+extern "C" DWORD64 __cdecl GetModuleHandle64(wchar_t* lpModuleName);
+extern "C" DWORD64 __cdecl GetProcAddress64(DWORD64 hModule, char* funcName);
+#pragma comment(lib, "wow64ext.lib")
 #endif
 
 namespace unlocker {
@@ -65,7 +87,7 @@ namespace unlocker {
 		OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken);
 		LUID luid;
 		if (!LookupPrivilegeValue(NULL, lpszPrivilege, &luid)) return FALSE;
-		TOKEN_PRIVILEGES tp = {1, {luid, bEnablePrivilege ? SE_PRIVILEGE_ENABLED : 0}};
+		TOKEN_PRIVILEGES tp = {1, {luid, (DWORD)(bEnablePrivilege ? SE_PRIVILEGE_ENABLED : 0)}};
 		AdjustTokenPrivileges(hToken, FALSE, &tp, 0, (PTOKEN_PRIVILEGES) NULL, 0); 
 		return (GetLastError() == ERROR_SUCCESS);
 	}
@@ -76,7 +98,7 @@ namespace unlocker {
 	{
 	public:
 		Path(const tstring& path) : _path() {
-			if(path.length() > 2 && !_tcsnicmp(path.c_str(), _T("\\\\"), 2))
+			if (path.length() > 2 && !_tcsnicmp(path.c_str(), _T("\\\\"), 2))
 				_path = path;
 			else {
 				_path = _T("\\\\?\\");
@@ -87,7 +109,7 @@ namespace unlocker {
 			tstring ret(prefix);
 			ret += '\\';
 			tstring::size_type pos = path.find_first_not_of('\\');
-			if(pos != tstring::npos) {
+			if (pos != tstring::npos) {
 				ret.append(path, pos, path.length() - pos);
 			}
 			return ret;
@@ -138,7 +160,7 @@ namespace unlocker {
 	public:
 		Dir(const tstring& path) : File((!path.empty() && path[path.length() - 1] == '\\') ? path.substr(0, path.length() - 1) : path) {}
 		virtual BOOL Delete() {
-			list<Dir> dirs;
+			deque<Dir> dirs;
 			dirs.push_back(Dir(_path));
 			while (!dirs.empty()) {
 				Path dir(dirs.front());
@@ -151,7 +173,7 @@ namespace unlocker {
 					do {
 						if (!_tcscmp(fd.cFileName, _T(".")) || !_tcscmp(fd.cFileName, _T("..")))
 							continue;
-						else if(fd.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY)) {
+						else if (fd.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY)) {
 							++subDirCnt;
 							dirs.push_front(Dir(Path::Combine(dir, fd.cFileName)));
 						}
@@ -298,8 +320,8 @@ namespace unlocker {
 		static HMODULE hKernel32 = LoadLibrary(_T("kernel32.dll"));
 
 		typedef struct _HOLDER_INFO {
-			vector<HANDLE> openHandles;
-			vector<HANDLE> mmfSections;
+			deque<HANDLE> openHandles;
+			deque<HANDLE> mmfSections;
 		} HOLDER_INFO;
 
 		void GetDeviceDriveMap(map<tstring, tstring>& pathMapping)
@@ -492,7 +514,8 @@ namespace unlocker {
 
 		BOOL RemoteFreeLibrary(HANDLE hProcess, LPTSTR lpszDllName)
 		{
-			DWORD dwSize = (lstrlen(lpszDllName) + 1) * sizeof(TCHAR), dwWritten = 0;
+			DWORD dwSize = (lstrlen(lpszDllName) + 1) * sizeof(TCHAR);
+			SIZE_T dwWritten = 0;
 			LPVOID lpBuf = VirtualAllocEx(hProcess, NULL, dwSize, MEM_COMMIT, PAGE_READWRITE);
 			if (!lpBuf) return FALSE;
 			if (!WriteProcessMemory(hProcess, lpBuf, lpszDllName, dwSize, &dwWritten))
@@ -526,6 +549,43 @@ namespace unlocker {
 			return (dwRet == ERROR_SUCCESS);
 		}
 
+#ifndef _WIN64
+		BOOL RemoteFreeLibrary64(HANDLE hProcess, LPTSTR lpszDllName)
+		{
+			static DWORD64 GetModuleHandle = GetProcAddress64(GetModuleHandle64(L"kernel32.dll"),
+#ifdef UNICODE
+				"GetModuleHandleW"
+#else
+				"GetModuleHandleA"
+#endif // !UNICODE
+			);
+			static DWORD64 FreeLibrary = GetProcAddress64(GetModuleHandle64(L"kernel32.dll"),
+#ifdef UNICODE
+				"FreeLibraryW"
+#else
+				"FreeLibraryA"
+#endif // !UNICODE
+			);
+			static DWORD64 CreateRemoteThread64 = GetProcAddress64(GetModuleHandle64(L"kernel32.dll"), "CreateRemoteThread");
+			if (!GetModuleHandle || !FreeLibrary || !CreateRemoteThread64)
+				return FALSE;
+			_UNICODE_STRING_T<DWORD64> fName = { 0 };
+			fName.Buffer = (DWORD64)lpszDllName;
+			fName.Length = (WORD)lstrlen(lpszDllName);
+			fName.MaximumLength = fName.Length + 1;
+			SmartHandle hThread = (HANDLE)X64Call(CreateRemoteThread64, 7, (DWORD64)hProcess, (DWORD64)NULL, (DWORD64)0, (DWORD64)GetModuleHandle, (DWORD64)&fName, (DWORD64)0, (DWORD64)NULL);
+			if (!hThread) return FALSE;
+			WaitForSingleObject(hThread, 1000);
+			DWORD dwRet = 0;
+			GetExitCodeThread(hThread, &dwRet);
+
+			hThread = (HANDLE)X64Call(CreateRemoteThread64, 7, (DWORD64)hProcess, (DWORD64)NULL, (DWORD64)0, (DWORD64)FreeLibrary, (DWORD64)NULL, (DWORD64)0, (DWORD64)NULL);
+			WaitForSingleObject(hThread, 1000);
+			GetExitCodeThread(hThread, &dwRet);
+			return (dwRet == ERROR_SUCCESS);
+		}
+#endif
+
 		BOOL RemoteUnmapViewOfFile(HANDLE hProcess, LPVOID lpBaseAddress)
 		{
 			SmartHandle hThread = CreateRemoteThread(hProcess, NULL, 0, (LPTHREAD_START_ROUTINE)GetProcAddress(hKernel32, "UnmapViewOfFile"), lpBaseAddress, 0, NULL);
@@ -546,7 +606,8 @@ namespace unlocker {
 
 			// Windows 32bit limit: 0xFFFFFFFF.
 			// Windows 64bit limit: 0x7FFFFFFFFFF.
-			unsigned long long maxAddress = (systemInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64 && !isWow64) ? 0x80000000000 : 0x100000000;
+			unsigned long long maxAddress = ((systemInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64
+											|| systemInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_IA64) && !isWow64) ? 0x80000000000 : 0x100000000;
 
 			MEMORY_BASIC_INFORMATION mbi = { 0 }, mbiLast = { 0 };
 			BOOL found = FALSE;
@@ -576,7 +637,7 @@ namespace unlocker {
 			NORMAL_FILE,
 			EXE_FILE,
 			DLL_FILE
-		};
+		} FILE_TYPE;
 
 		FILE_TYPE CheckFileType(const tstring& path)
 		{
@@ -596,8 +657,65 @@ namespace unlocker {
 				& IMAGE_FILE_DLL) ? DLL_FILE : EXE_FILE;
 		}
 
+		BOOL CurrentProcessWorkOnWow64()
+		{
+			BOOL isWow64 = FALSE;
+			SmartHandle hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, GetCurrentProcessId());
+			IsWow64Process(hProcess, &isWow64);
+			return isWow64;
+		}
+
+		BOOL UnholdPEFile(const tstring& path)
+		{
+			FILE_TYPE type = CheckFileType(path);
+			if (type != DLL_FILE && type != EXE_FILE)
+				return TRUE;
+			static BOOL curProcWow64 = CurrentProcessWorkOnWow64();
+			SmartHandle hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	        PROCESSENTRY32 pe32 = { sizeof (pe32) };
+	        if (Process32First (hSnapshot, &pe32)) {
+	            do {
+					_tprintf_s(_T("%s [%u]\n"), pe32.szExeFile, pe32.th32ProcessID);
+#ifdef _WIN64
+					SmartHandle hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE32 | TH32CS_SNAPMODULE, pe32.th32ProcessID);
+#else
+					SmartHandle hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, pe32.th32ProcessID);
+#endif
+					if (hSnap == INVALID_HANDLE_VALUE)
+						continue;
+					MODULEENTRY32 mod = { sizeof (mod) };
+					if (Module32First(hSnap, &mod)) {
+						do {
+							if (!_tcsicmp(mod.szExePath, path.c_str())) {
+								SmartHandle hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pe32.th32ProcessID);
+								if (type == EXE_FILE) {
+									TerminateProcess(hProcess, 0);
+									break;
+								}
+								else {
+#ifndef _WIN64
+									BOOL isWow64 = FALSE;
+									IsWow64Process(hProcess, &isWow64);
+									if (curProcWow64 && !isWow64) {
+										// 32 bit process inject 64 bit process
+										RemoteFreeLibrary64(hProcess, mod.szModule);
+									}
+									else
+#endif
+										RemoteFreeLibrary(hProcess, mod.szModule);
+								}
+							}
+						} while (type != EXE_FILE && Module32Next(hSnap, &mod));
+					}
+	            }
+	            while (Process32Next(hSnapshot, &pe32));
+	        }
+			return TRUE;
+		}
+
 		BOOL UnholdFile(const tstring& path)
 		{
+			UnholdPEFile(path);
 			map<DWORD, HOLDER_INFO> holders;
 			if (!FindFileHandleHolders<SYSTEM_HANDLE_INFORMATION_EX, SystemHandleInformationEx>(path.c_str(), holders))
 				if (!FindFileHandleHolders<SYSTEM_HANDLE_INFORMATION, SystemHandleInformation>(path.c_str(), holders))
@@ -609,7 +727,7 @@ namespace unlocker {
 				DevicePathToDrivePath(holderPath);
 				if (CloseMapViewOfFile(hProcess, path.c_str())) {
 					// check memory-mapping file handle in mmfSections
-					for (vector<HANDLE>::const_iterator i=it->second.mmfSections.begin(); i!=it->second.mmfSections.end(); ++i) {
+					for (deque<HANDLE>::const_iterator i=it->second.mmfSections.begin(); i!=it->second.mmfSections.end(); ++i) {
 						SmartHandle hDupHandle;
 						if (!DuplicateHandle(hProcess, *i, GetCurrentProcess(), &hDupHandle, 0, FALSE, DUPLICATE_SAME_ACCESS))
 							continue;
@@ -621,19 +739,24 @@ namespace unlocker {
 							// if specific file occurred, close this handle
 							tstring mmfPath;
 							GetHandlePath(hDupHandle, mmfPath);
-							BOOL b = CloseHandleWithProcess(it->first, *i);//CloseRemoteHandle(hProcess, *i);
-							_tprintf_s(_T("%s [%u](0x%X) <mmf:%s> %s\n"), b ? _T("OK") : _T("FAIL"), it->first, *i, mmfPath.c_str(), holderPath.c_str());
+							bool ok = CloseHandleWithProcess(it->first, *i);
+							SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), ok ? FOREGROUND_GREEN : FOREGROUND_RED);
+							_tprintf_s(_T("%s [%u](0x%lX) <mmf:%s> %s\n"), ok ? _T("OK") : _T("FAIL"), it->first, *i, mmfPath.c_str(), holderPath.c_str());
+							SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 7);
 						}
 						else
 							// UnmapViewOfFile
 							UnmapViewOfFile(p);
 					}
 				}
-				for (vector<HANDLE>::const_iterator i=it->second.openHandles.begin(); i!=it->second.openHandles.end(); ++i) {
-					BOOL b = CloseHandleWithProcess(it->first, *i);//CloseRemoteHandle(hProcess, *i);
-					_tprintf_s(_T("%s [%u](0x%X) %s\n"), b ? _T("OK") : _T("FAIL"), it->first, *i, holderPath.c_str());
+				for (deque<HANDLE>::const_iterator i=it->second.openHandles.begin(); i!=it->second.openHandles.end(); ++i) {
+					bool ok = CloseHandleWithProcess(it->first, *i);
+					SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), ok ? FOREGROUND_GREEN : FOREGROUND_RED);
+					_tprintf_s(_T("%s [%u](0x%lX) %s\n"), ok ? _T("OK") : _T("FAIL"), it->first, *i, holderPath.c_str());
+					SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 7);
 				}
 			}
+			return TRUE;
 		}
 	}
 };

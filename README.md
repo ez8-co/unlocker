@@ -16,7 +16,7 @@ Aimed to be better than famous tool - unlocker @ Cedrick Collomb.
 - [x] low resource comsuption & quick scan improvement
     * hang-up handle check without creating a mount of threads ([Robert Simpson's answer at stackoverflow.com](http://stackoverflow.com/questions/16127948/hang-on-ntquerysysteminformation-in-winxpx32-but-works-fine-in-win7x64))
 - [x] support operating files in UNC/Network drive
-- [ ] support operations cross x64 and x86 modules
+- [x] support operations cross x64 and x86 modules
 - [ ] support terminate some of the protected Ring3 processes
 - [ ] support all version of Visual C++ or Visual Studio (both UNICODE & non-UNICODE projects)
 - [ ] support all version of Windows OS
