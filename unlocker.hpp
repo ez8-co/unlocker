@@ -12,6 +12,7 @@
 #include <windows.h>
 
 #include <deque>
+#include <vector>
 #include <map>
 using namespace std;
 
@@ -31,25 +32,19 @@ typedef std::basic_string<TCHAR, std::char_traits<TCHAR>, std::allocator<TCHAR> 
 #define NT_SUCCESS(Status)			(((NTSTATUS)(Status)) >= 0)
 #endif
 
-#ifndef _WIN64
-template <class T>
-struct _UNICODE_STRING_T
+#define ProcessBasicInformation 0
+
+#ifndef UNICODE
+static string W2T(const wchar_t* wcs)
 {
-	union
-	{
-		struct
-		{
-			WORD Length;
-			WORD MaximumLength;
-		};
-		T dummy;
-	};
-	T Buffer;
-};
-extern "C" DWORD64 __cdecl X64Call(DWORD64 func, int argC, ...);
-extern "C" DWORD64 __cdecl GetModuleHandle64(wchar_t* lpModuleName);
-extern "C" DWORD64 __cdecl GetProcAddress64(DWORD64 hModule, char* funcName);
-#pragma comment(lib, "wow64ext.lib")
+	int len = ::WideCharToMultiByte(CP_ACP, 0, wcs, -1, NULL, 0, 0, 0);
+	string ret(len, 0);
+	VERIFY(0 != ::WideCharToMultiByte(CP_ACP, 0, wcs, -1, &ret[0], len, 0, 0));
+	ret.resize(len - 1);
+	return ret;
+}
+#else
+#define W2T(str) wstring(str)
 #endif
 
 namespace unlocker {
@@ -216,14 +211,23 @@ namespace unlocker {
 	}
 
 	namespace {
-		typedef struct _UNICODE_STRING {
-			WORD  Length;
-			WORD  MaximumLength;
-			PWSTR Buffer;
-		} UNICODE_STRING;
+		template <class T>
+		struct _UNICODE_STRING_T
+		{
+		    union
+		    {
+		        struct
+		        {
+		            WORD Length;
+		            WORD MaximumLength;
+		        };
+		        T dummy;
+		    };
+		    T Buffer;
+		};
 
 		typedef struct _OBJECT_NAME_INFORMATION {
-			UNICODE_STRING Name;
+			_UNICODE_STRING_T<PWSTR> Name;
 			WCHAR NameBuffer[1];
 		} OBJECT_NAME_INFORMATION, *POBJECT_NAME_INFORMATION;
 
@@ -238,8 +242,8 @@ namespace unlocker {
 		} POOL_TYPE, *PPOOL_TYPE;
 
 		typedef struct _OBJECT_TYPE_INFORMATION {
-			UNICODE_STRING Name;
-			// omit unused members
+			_UNICODE_STRING_T<PWSTR> Name;
+			// omit unused fields
 		} OBJECT_TYPE_INFORMATION, *POBJECT_TYPE_INFORMATION;
 
 		typedef NTSTATUS (WINAPI *NT_QUERY_OBJECT)(
@@ -301,6 +305,79 @@ namespace unlocker {
 			LARGE_INTEGER	SectionSize;
 		} SECTION_BASIC_INFORMATION;
 
+		template <typename T>
+		struct _LIST_ENTRY_T
+		{
+			T Flink;
+			T Blink;
+		};
+
+		template <typename T>
+		struct _PEB_T
+		{
+			T dummy01;
+			T Mutant;
+			T ImageBaseAddress;
+			T Ldr;
+			// omit unused fields
+		};
+
+		typedef _PEB_T<DWORD> PEB32;
+		typedef _PEB_T<DWORD64> PEB64;
+
+		typedef struct _PROCESS_BASIC_INFORMATION64 {
+			NTSTATUS ExitStatus;
+			UINT32 Reserved0;
+			UINT64 PebBaseAddress;
+			UINT64 AffinityMask;
+			UINT32 BasePriority;
+			UINT32 Reserved1;
+			UINT64 UniqueProcessId;
+			UINT64 InheritedFromUniqueProcessId;
+		} PROCESS_BASIC_INFORMATION64;
+
+		typedef struct _PROCESS_BASIC_INFORMATION32 {
+			NTSTATUS ExitStatus;
+			UINT32 PebBaseAddress;
+			UINT32 AffinityMask;
+			UINT32 BasePriority;
+			UINT32 UniqueProcessId;
+			UINT32 InheritedFromUniqueProcessId;
+		} PROCESS_BASIC_INFORMATION32;
+
+		template <class T>
+		struct _PEB_LDR_DATA_T
+		{
+			DWORD Length;
+			DWORD Initialized;
+			T SsHandle;
+			_LIST_ENTRY_T<T> InLoadOrderModuleList;
+			// omit unused fields
+		};
+
+		typedef _PEB_LDR_DATA_T<DWORD> PEB_LDR_DATA32;
+		typedef _PEB_LDR_DATA_T<DWORD64> PEB_LDR_DATA64;
+
+		template <class T>
+		struct _LDR_DATA_TABLE_ENTRY_T
+		{
+			_LIST_ENTRY_T<T> InLoadOrderLinks;
+			_LIST_ENTRY_T<T> InMemoryOrderLinks;
+			_LIST_ENTRY_T<T> InInitializationOrderLinks;
+			T DllBase;
+			T EntryPoint;
+			union
+			{
+				DWORD SizeOfImage;
+				T dummy01;
+			};
+			_UNICODE_STRING_T<T> FullDllName;
+			// omit unused fields
+		};
+
+		typedef _LDR_DATA_TABLE_ENTRY_T<DWORD> LDR_DATA_TABLE_ENTRY32;
+		typedef _LDR_DATA_TABLE_ENTRY_T<DWORD64> LDR_DATA_TABLE_ENTRY64;
+
 		typedef NTSTATUS (WINAPI *NT_QUERY_SECTION)(
 			IN HANDLE	SectionHandle,
 			IN SECTION_INFORMATION_CLASS	InformationClass,
@@ -314,10 +391,41 @@ namespace unlocker {
 			IN ULONG   SystemInformationLength,
 			OUT PULONG ReturnLength OPTIONAL);
 
-		static NT_QUERY_SYSTEM_INFORMATION NtQuerySystemInformation = (NT_QUERY_SYSTEM_INFORMATION)GetProcAddress(GetModuleHandle (_T("ntdll")), "NtQuerySystemInformation");
-		static NT_QUERY_OBJECT NtQueryObject = (NT_QUERY_OBJECT)GetProcAddress(GetModuleHandle (_T("ntdll")), "NtQueryObject");
-		static NT_QUERY_SECTION NtQuerySection = (NT_QUERY_SECTION)GetProcAddress(GetModuleHandle (_T("ntdll")), "NtQuerySection");
+		static HMODULE hNtDll = LoadLibrary(_T("ntdll.dll"));
+		static NT_QUERY_SYSTEM_INFORMATION NtQuerySystemInformation = (NT_QUERY_SYSTEM_INFORMATION)GetProcAddress(hNtDll, "NtQuerySystemInformation");
+		static NT_QUERY_OBJECT NtQueryObject = (NT_QUERY_OBJECT)GetProcAddress(hNtDll, "NtQueryObject");
+		static NT_QUERY_SECTION NtQuerySection = (NT_QUERY_SECTION)GetProcAddress(hNtDll, "NtQuerySection");
 		static HMODULE hKernel32 = LoadLibrary(_T("kernel32.dll"));
+
+#ifndef _WIN64
+		typedef NTSTATUS(WINAPI *NT_WOW64_QUERY_INFORMATION_PROCESS64)(
+			HANDLE ProcessHandle, UINT32 ProcessInformationClass,
+			PVOID ProcessInformation, UINT32 ProcessInformationLength,
+			UINT32* ReturnLength);
+
+		typedef NTSTATUS(WINAPI *NT_QUERY_INFORMATION_PROCESS)(
+			HANDLE ProcessHandle, ULONG ProcessInformationClass,
+			PVOID ProcessInformation, UINT32 ProcessInformationLength,
+			UINT32* ReturnLength);
+
+		typedef NTSTATUS(WINAPI *NT_WOW64_READ_VIRTUAL_MEMORY64)(
+			HANDLE ProcessHandle, PVOID64 BaseAddress,
+			PVOID BufferData, UINT64 BufferLength,
+			PUINT64 ReturnLength);
+
+		static NT_WOW64_QUERY_INFORMATION_PROCESS64 NtWow64QueryInformationProcess64 = (NT_WOW64_QUERY_INFORMATION_PROCESS64)GetProcAddress(hNtDll, "NtWow64QueryInformationProcess64");
+		static NT_WOW64_READ_VIRTUAL_MEMORY64 NtWow64ReadVirtualMemory64 = (NT_WOW64_READ_VIRTUAL_MEMORY64)GetProcAddress(hNtDll, "NtWow64ReadVirtualMemory64");
+#endif
+
+		BOOL Is64BitOS()
+		{
+			SYSTEM_INFO systemInfo = { 0 };
+			GetNativeSystemInfo(&systemInfo);
+			return systemInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64
+				|| systemInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_IA64;
+		}
+
+		static BOOL is64BitOS = Is64BitOS();
 
 		typedef struct _HOLDER_INFO {
 			deque<HANDLE> openHandles;
@@ -403,7 +511,7 @@ namespace unlocker {
 
 			BOOL bRet = FALSE;
 			if (NT_SUCCESS(status)) {
-				path = pInfo->Name.Buffer ? pInfo->Name.Buffer : _T("");
+				path = W2T(pInfo->Name.Buffer ? pInfo->Name.Buffer : _T(""));
 				bRet = DevicePathToDrivePath(path);
 			}
 
@@ -494,6 +602,39 @@ namespace unlocker {
 			return TRUE;
 		}
 
+		DWORD64 FindModule64(HANDLE hProcess, const tstring& path)
+		{
+			PROCESS_BASIC_INFORMATION64 pbi = { 0 };
+			NTSTATUS status = NtWow64QueryInformationProcess64(hProcess, ProcessBasicInformation, &pbi, sizeof(pbi), NULL);
+			if (!NT_SUCCESS(status)) return 0;
+
+			PEB64 peb;
+			status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)pbi.PebBaseAddress, &peb, sizeof(peb), NULL);
+			if (!NT_SUCCESS(status)) return 0;
+
+			PEB_LDR_DATA64 ldr;
+			status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)peb.Ldr, (PVOID)&ldr, sizeof(ldr), NULL);
+			if (!NT_SUCCESS(status)) return 0;
+
+			DWORD64 LastEntry = peb.Ldr + offsetof(PEB_LDR_DATA64, InLoadOrderModuleList);
+
+			LDR_DATA_TABLE_ENTRY64 head;
+			head.InLoadOrderLinks.Flink = ldr.InLoadOrderModuleList.Flink;
+			do {
+				status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)head.InLoadOrderLinks.Flink, (PVOID)&head, sizeof(LDR_DATA_TABLE_ENTRY64), NULL);
+				if (!NT_SUCCESS(status)) continue;
+
+				wstring dll_name((size_t)head.FullDllName.MaximumLength, 0);
+				status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)head.FullDllName.Buffer, (PVOID)&dll_name[0], head.FullDllName.MaximumLength, NULL);
+				if(!NT_SUCCESS(status)) continue;
+
+				if(path == W2T(dll_name).c_str()) {
+					return head.DllBase;
+				}
+			} while (head.InLoadOrderLinks.Flink != LastEntry);
+			return 0;
+		}
+
 		BOOL CloseRemoteHandle(HANDLE hProcess, HANDLE hHandle)
 		{
 			SmartHandle hThread = CreateRemoteThread(hProcess, 0, 0, (LPTHREAD_START_ROUTINE)GetProcAddress(hKernel32, "CloseHandle"), hHandle, 0, NULL);
@@ -512,77 +653,49 @@ namespace unlocker {
 			return FALSE;
 		}
 
-		BOOL RemoteFreeLibrary(HANDLE hProcess, LPTSTR lpszDllName)
+		BOOL RemoteFreeLibrary(HANDLE hProcess, PVOID modBaseAddr)
 		{
-			DWORD dwSize = (lstrlen(lpszDllName) + 1) * sizeof(TCHAR);
-			SIZE_T dwWritten = 0;
-			LPVOID lpBuf = VirtualAllocEx(hProcess, NULL, dwSize, MEM_COMMIT, PAGE_READWRITE);
-			if (!lpBuf) return FALSE;
-			if (!WriteProcessMemory(hProcess, lpBuf, lpszDllName, dwSize, &dwWritten))
-				return FALSE;
-			if (dwWritten != dwSize) {
-				VirtualFreeEx(hProcess, lpBuf, dwSize, MEM_DECOMMIT);
-				return FALSE;
-			}
-			SmartHandle hThread = CreateRemoteThread(hProcess, NULL, 0, (LPTHREAD_START_ROUTINE)GetProcAddress(hKernel32, 
-	#ifdef UNICODE
-				"GetModuleHandleW"
-	#else
-				"GetModuleHandleA"
-	#endif // !UNICODE
-				), lpBuf, 0, NULL);
+			SmartHandle hThread = CreateRemoteThread(hProcess, NULL, 0, (LPTHREAD_START_ROUTINE)GetProcAddress(hNtDll, "LdrUnloadDll"), modBaseAddr, 0, NULL);
 			if (!hThread) return FALSE;
 			WaitForSingleObject(hThread, 1000);
 			DWORD dwRet = 0;
-			GetExitCodeThread(hThread, &dwRet);
-			VirtualFreeEx(hProcess, lpBuf, dwSize, MEM_DECOMMIT);
-
-			hThread = CreateRemoteThread(hProcess, NULL, 0, (LPTHREAD_START_ROUTINE)GetProcAddress(hKernel32, 
-	#ifdef UNICODE
-				"FreeLibraryW"
-	#else
-				"FreeLibraryA"
-	#endif // !UNICODE
-				), NULL, 0, NULL);
-			WaitForSingleObject(hThread, 1000);
 			GetExitCodeThread(hThread, &dwRet);
 			return (dwRet == ERROR_SUCCESS);
 		}
 
 #ifndef _WIN64
-		BOOL RemoteFreeLibrary64(HANDLE hProcess, LPTSTR lpszDllName)
-		{
-			static DWORD64 GetModuleHandle = GetProcAddress64(GetModuleHandle64(L"kernel32.dll"),
-#ifdef UNICODE
-				"GetModuleHandleW"
-#else
-				"GetModuleHandleA"
-#endif // !UNICODE
-			);
-			static DWORD64 FreeLibrary = GetProcAddress64(GetModuleHandle64(L"kernel32.dll"),
-#ifdef UNICODE
-				"FreeLibraryW"
-#else
-				"FreeLibraryA"
-#endif // !UNICODE
-			);
-			static DWORD64 CreateRemoteThread64 = GetProcAddress64(GetModuleHandle64(L"kernel32.dll"), "CreateRemoteThread");
-			if (!GetModuleHandle || !FreeLibrary || !CreateRemoteThread64)
-				return FALSE;
-			_UNICODE_STRING_T<DWORD64> fName = { 0 };
-			fName.Buffer = (DWORD64)lpszDllName;
-			fName.Length = (WORD)lstrlen(lpszDllName);
-			fName.MaximumLength = fName.Length + 1;
-			SmartHandle hThread = (HANDLE)X64Call(CreateRemoteThread64, 7, (DWORD64)hProcess, (DWORD64)NULL, (DWORD64)0, (DWORD64)GetModuleHandle, (DWORD64)&fName, (DWORD64)0, (DWORD64)NULL);
-			if (!hThread) return FALSE;
-			WaitForSingleObject(hThread, 1000);
-			DWORD dwRet = 0;
-			GetExitCodeThread(hThread, &dwRet);
 
-			hThread = (HANDLE)X64Call(CreateRemoteThread64, 7, (DWORD64)hProcess, (DWORD64)NULL, (DWORD64)0, (DWORD64)FreeLibrary, (DWORD64)NULL, (DWORD64)0, (DWORD64)NULL);
-			WaitForSingleObject(hThread, 1000);
-			GetExitCodeThread(hThread, &dwRet);
-			return (dwRet == ERROR_SUCCESS);
+extern "C" DWORD64 __cdecl X64Call(DWORD64 func, int argC, ...);
+extern "C" DWORD64 __cdecl GetModuleHandle64(wchar_t* lpModuleName);
+extern "C" DWORD64 __cdecl GetProcAddress64(DWORD64 hModule, char* funcName);
+
+#ifdef _DEBUG
+	#pragma comment(lib, "wow64extd.lib")
+#else
+	#pragma comment(lib, "wow64ext.lib")
+#endif
+
+		BOOL RemoteFreeLibrary64(HANDLE hProcess, PVOID64 modBaseAddr)
+		{
+			static DWORD64 hNtdll64 = GetModuleHandle64(L"ntdll.dll");
+			if(!hNtdll64) return FALSE;
+			static DWORD64 RtlCreateUserThread64 = GetProcAddress64(hNtdll64, "RtlCreateUserThread");
+			if(!RtlCreateUserThread64) return FALSE;
+
+			SmartHandle hThread;
+			DWORD64 client_cid[2] = { 0 };
+			X64Call(RtlCreateUserThread64, 10,
+				(DWORD64)hProcess,        // ProcessHandle
+				(DWORD64)NULL,            // SecurityDescriptor
+				(DWORD64)FALSE,           // CreateSuspended
+				(DWORD64)0,               // StackZeroBits
+				(DWORD64)NULL,            // StackReserved
+				(DWORD64)NULL,            // StackCommit
+				GetProcAddress64(hNtdll64, "LdrUnloadDll"),           // StartAddress
+				modBaseAddr,              // StartParameter
+				(DWORD64)&hThread,        // ThreadHandle
+				(DWORD64)&client_cid);    // ClientID
+			return INVALID_HANDLE_VALUE != hThread;
 		}
 #endif
 
@@ -598,16 +711,12 @@ namespace unlocker {
 
 		BOOL CloseMapViewOfFile(HANDLE hProcess, LPCTSTR path)
 		{
-			BOOL isWow64 = FALSE;
-			IsWow64Process(hProcess, &isWow64);
-
-			SYSTEM_INFO systemInfo = {0};
-			GetNativeSystemInfo(&systemInfo);
+			BOOL isRemoteWow64 = FALSE;
+			IsWow64Process(hProcess, &isRemoteWow64);
 
 			// Windows 32bit limit: 0xFFFFFFFF.
 			// Windows 64bit limit: 0x7FFFFFFFFFF.
-			unsigned long long maxAddress = ((systemInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64
-											|| systemInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_IA64) && !isWow64) ? 0x80000000000 : 0x100000000;
+			unsigned long long maxAddress = (is64BitOS && !isRemoteWow64) ? 0x80000000000 : 0x100000000;
 
 			MEMORY_BASIC_INFORMATION mbi = { 0 }, mbiLast = { 0 };
 			BOOL found = FALSE;
@@ -618,7 +727,7 @@ namespace unlocker {
 				if (mbi.Type == MEM_MAPPED) {
 					if (mbiLast.AllocationBase != mbi.AllocationBase) {
 						tstring filepath(MAX_PATH, '\0');
-						filepath.resize(GetMappedFileName(hProcess, mbi.BaseAddress, &filepath[0], filepath.size()));
+						filepath.resize((DWORD)GetMappedFileName(hProcess, mbi.BaseAddress, &filepath[0], filepath.size()));
 						DevicePathToDrivePath(filepath);
 						if (!filepath.empty() && Path::Contains(path, filepath.c_str())) {
 							RemoteUnmapViewOfFile(hProcess, mbi.BaseAddress);
@@ -653,16 +762,8 @@ namespace unlocker {
 				|| *((DWORD*)((PBYTE)pvMem + ((PIMAGE_DOS_HEADER)pvMem)->e_lfanew)) != IMAGE_NT_SIGNATURE)
 				return NORMAL_FILE;
 
-			return (((PIMAGE_FILE_HEADER)(PBYTE)pvMem + ((PIMAGE_DOS_HEADER)pvMem)->e_lfanew + sizeof(DWORD))->Characteristics
+			return (((PIMAGE_FILE_HEADER)((PBYTE)pvMem + ((PIMAGE_DOS_HEADER)pvMem)->e_lfanew + sizeof(DWORD)))->Characteristics
 				& IMAGE_FILE_DLL) ? DLL_FILE : EXE_FILE;
-		}
-
-		BOOL CurrentProcessWorkOnWow64()
-		{
-			BOOL isWow64 = FALSE;
-			SmartHandle hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, GetCurrentProcessId());
-			IsWow64Process(hProcess, &isWow64);
-			return isWow64;
 		}
 
 		BOOL UnholdPEFile(const tstring& path)
@@ -670,43 +771,45 @@ namespace unlocker {
 			FILE_TYPE type = CheckFileType(path);
 			if (type != DLL_FILE && type != EXE_FILE)
 				return TRUE;
-			static BOOL curProcWow64 = CurrentProcessWorkOnWow64();
 			SmartHandle hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 	        PROCESSENTRY32 pe32 = { sizeof (pe32) };
 	        if (Process32First (hSnapshot, &pe32)) {
 	            do {
 					_tprintf_s(_T("%s [%u]\n"), pe32.szExeFile, pe32.th32ProcessID);
-#ifdef _WIN64
-					SmartHandle hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE32 | TH32CS_SNAPMODULE, pe32.th32ProcessID);
-#else
-					SmartHandle hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, pe32.th32ProcessID);
-#endif
-					if (hSnap == INVALID_HANDLE_VALUE)
-						continue;
-					MODULEENTRY32 mod = { sizeof (mod) };
-					if (Module32First(hSnap, &mod)) {
-						do {
-							if (!_tcsicmp(mod.szExePath, path.c_str())) {
-								SmartHandle hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pe32.th32ProcessID);
-								if (type == EXE_FILE) {
-									TerminateProcess(hProcess, 0);
-									break;
-								}
-								else {
+					SmartHandle hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pe32.th32ProcessID);
 #ifndef _WIN64
-									BOOL isWow64 = FALSE;
-									IsWow64Process(hProcess, &isWow64);
-									if (curProcWow64 && !isWow64) {
-										// 32 bit process inject 64 bit process
-										RemoteFreeLibrary64(hProcess, mod.szModule);
-									}
-									else
-#endif
-										RemoteFreeLibrary(hProcess, mod.szModule);
-								}
-							}
-						} while (type != EXE_FILE && Module32Next(hSnap, &mod));
+					BOOL isRemoteWow64 = FALSE;
+					IsWow64Process(hProcess, &isRemoteWow64);
+					if (is64BitOS && !isRemoteWow64) {
+						DWORD64 dllBaseAddr = FindModule64(hProcess, path);
+						if (dllBaseAddr) {
+							// 32 bit process inject 64 bit process
+							RemoteFreeLibrary64(hProcess, (PVOID64)dllBaseAddr);
+						}
 					}
+					else {
+#endif
+						SmartHandle hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE32 | TH32CS_SNAPMODULE, pe32.th32ProcessID);
+						if (hSnap == INVALID_HANDLE_VALUE) {
+							continue;
+						}
+						MODULEENTRY32 mod = { sizeof(mod) };
+						if (Module32First(hSnap, &mod)) {
+							do {
+								if (!_tcsicmp(mod.szExePath, path.c_str())) {
+									if (type == EXE_FILE) {
+										TerminateProcess(hProcess, 0);
+										break;
+									}
+									else {
+										RemoteFreeLibrary(hProcess, mod.modBaseAddr);
+									}
+								}
+							} while (type != EXE_FILE && Module32Next(hSnap, &mod));
+						}
+#ifndef _WIN64
+					}
+#endif
 	            }
 	            while (Process32Next(hSnapshot, &pe32));
 	        }
@@ -715,7 +818,6 @@ namespace unlocker {
 
 		BOOL UnholdFile(const tstring& path)
 		{
-			UnholdPEFile(path);
 			map<DWORD, HOLDER_INFO> holders;
 			if (!FindFileHandleHolders<SYSTEM_HANDLE_INFORMATION_EX, SystemHandleInformationEx>(path.c_str(), holders))
 				if (!FindFileHandleHolders<SYSTEM_HANDLE_INFORMATION, SystemHandleInformation>(path.c_str(), holders))
@@ -723,7 +825,7 @@ namespace unlocker {
 			for (map<DWORD, HOLDER_INFO>::const_iterator it=holders.begin(); it!=holders.end(); ++it) {
 				SmartHandle hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, it->first);
 				tstring holderPath(MAX_PATH, '\0');
-				holderPath.resize(GetProcessImageFileName(hProcess, &holderPath[0], holderPath.size()));
+				holderPath.resize((DWORD)GetProcessImageFileName(hProcess, &holderPath[0], holderPath.size()));
 				DevicePathToDrivePath(holderPath);
 				if (CloseMapViewOfFile(hProcess, path.c_str())) {
 					// check memory-mapping file handle in mmfSections
@@ -741,7 +843,7 @@ namespace unlocker {
 							GetHandlePath(hDupHandle, mmfPath);
 							bool ok = CloseHandleWithProcess(it->first, *i);
 							SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), ok ? FOREGROUND_GREEN : FOREGROUND_RED);
-							_tprintf_s(_T("%s [%u](0x%lX) <mmf:%s> %s\n"), ok ? _T("OK") : _T("FAIL"), it->first, *i, mmfPath.c_str(), holderPath.c_str());
+							_tprintf_s(_T("%s [%u](0x%lX) <mmf:%s> %s\n"), ok ? _T("OK") : _T("FAIL"), it->first, (ULONG)*i, mmfPath.c_str(), holderPath.c_str());
 							SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 7);
 						}
 						else
@@ -752,10 +854,11 @@ namespace unlocker {
 				for (deque<HANDLE>::const_iterator i=it->second.openHandles.begin(); i!=it->second.openHandles.end(); ++i) {
 					bool ok = CloseHandleWithProcess(it->first, *i);
 					SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), ok ? FOREGROUND_GREEN : FOREGROUND_RED);
-					_tprintf_s(_T("%s [%u](0x%lX) %s\n"), ok ? _T("OK") : _T("FAIL"), it->first, *i, holderPath.c_str());
+					_tprintf_s(_T("%s [%u](0x%lX) %s\n"), ok ? _T("OK") : _T("FAIL"), it->first, (ULONG)*i, holderPath.c_str());
 					SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 7);
 				}
 			}
+			UnholdPEFile(path);
 			return TRUE;
 		}
 	}

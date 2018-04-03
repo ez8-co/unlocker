@@ -11,9 +11,9 @@ int _tmain(int argc, _TCHAR* argv[])
 {
 	unlocker::SetPrivilege(SE_DEBUG_NAME, TRUE);
 
-	unlocker::File* file = unlocker::Path::Exists(_T("f:\\a.xls"));
+	unlocker::File* file = unlocker::Path::Exists(_T("C:\\Users\\zhangwei01\\Desktop\\DllAgent\\x64\\Release\\x64.dll"));
 	if (file) {
-		file->ForceDelete();
+		file->Unlock();
 		delete file;
 	}
 
