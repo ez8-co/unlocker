@@ -372,6 +372,7 @@ namespace unlocker {
 				T dummy01;
 			};
 			_UNICODE_STRING_T<T> FullDllName;
+    		_UNICODE_STRING_T<T> BaseDllName;
 			// omit unused fields
 		};
 
@@ -602,39 +603,6 @@ namespace unlocker {
 			return TRUE;
 		}
 
-		DWORD64 FindModule64(HANDLE hProcess, const tstring& path)
-		{
-			PROCESS_BASIC_INFORMATION64 pbi = { 0 };
-			NTSTATUS status = NtWow64QueryInformationProcess64(hProcess, ProcessBasicInformation, &pbi, sizeof(pbi), NULL);
-			if (!NT_SUCCESS(status)) return 0;
-
-			PEB64 peb;
-			status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)pbi.PebBaseAddress, &peb, sizeof(peb), NULL);
-			if (!NT_SUCCESS(status)) return 0;
-
-			PEB_LDR_DATA64 ldr;
-			status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)peb.Ldr, (PVOID)&ldr, sizeof(ldr), NULL);
-			if (!NT_SUCCESS(status)) return 0;
-
-			DWORD64 LastEntry = peb.Ldr + offsetof(PEB_LDR_DATA64, InLoadOrderModuleList);
-
-			LDR_DATA_TABLE_ENTRY64 head;
-			head.InLoadOrderLinks.Flink = ldr.InLoadOrderModuleList.Flink;
-			do {
-				status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)head.InLoadOrderLinks.Flink, (PVOID)&head, sizeof(LDR_DATA_TABLE_ENTRY64), NULL);
-				if (!NT_SUCCESS(status)) continue;
-
-				wstring dll_name((size_t)head.FullDllName.MaximumLength, 0);
-				status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)head.FullDllName.Buffer, (PVOID)&dll_name[0], head.FullDllName.MaximumLength, NULL);
-				if(!NT_SUCCESS(status)) continue;
-
-				if(path == W2T(dll_name).c_str()) {
-					return head.DllBase;
-				}
-			} while (head.InLoadOrderLinks.Flink != LastEntry);
-			return 0;
-		}
-
 		BOOL CloseRemoteHandle(HANDLE hProcess, HANDLE hHandle)
 		{
 			SmartHandle hThread = CreateRemoteThread(hProcess, 0, 0, (LPTHREAD_START_ROUTINE)GetProcAddress(hKernel32, "CloseHandle"), hHandle, 0, NULL);
@@ -665,38 +633,125 @@ namespace unlocker {
 
 #ifndef _WIN64
 
-extern "C" DWORD64 __cdecl X64Call(DWORD64 func, int argC, ...);
-extern "C" DWORD64 __cdecl GetModuleHandle64(wchar_t* lpModuleName);
-extern "C" DWORD64 __cdecl GetProcAddress64(DWORD64 hModule, char* funcName);
+		DWORD64 FindModule64(HANDLE hProcess, const tstring& path, BOOL isPath = TRUE)
+		{
+			PROCESS_BASIC_INFORMATION64 pbi = { 0 };
+			NTSTATUS status = NtWow64QueryInformationProcess64(hProcess, ProcessBasicInformation, &pbi, sizeof(pbi), NULL);
+			if (!NT_SUCCESS(status)) return 0;
 
-#ifdef _DEBUG
-	#pragma comment(lib, "wow64extd.lib")
-#else
-	#pragma comment(lib, "wow64ext.lib")
-#endif
+			PEB64 peb;
+			status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)pbi.PebBaseAddress, &peb, sizeof(peb), NULL);
+			if (!NT_SUCCESS(status)) return 0;
+
+			PEB_LDR_DATA64 ldr;
+			status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)peb.Ldr, (PVOID)&ldr, sizeof(ldr), NULL);
+			if (!NT_SUCCESS(status)) return 0;
+
+			DWORD64 LastEntry = peb.Ldr + offsetof(PEB_LDR_DATA64, InLoadOrderModuleList);
+
+			LDR_DATA_TABLE_ENTRY64 head;
+			head.InLoadOrderLinks.Flink = ldr.InLoadOrderModuleList.Flink;
+			do {
+				status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)head.InLoadOrderLinks.Flink, (PVOID)&head, sizeof(LDR_DATA_TABLE_ENTRY64), NULL);
+				if (!NT_SUCCESS(status)) continue;
+
+				_UNICODE_STRING_T<DWORD64>* name = isPath ? &head.FullDllName : &head.BaseDllName;
+				wstring dll_name((size_t)name->MaximumLength, 0);
+				status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)name->Buffer, (PVOID)&dll_name[0], name->MaximumLength, NULL);
+				if (!NT_SUCCESS(status)) continue;
+
+				if (path == W2T(dll_name).c_str()) {
+					return head.DllBase;
+				}
+			} while (head.InLoadOrderLinks.Flink != LastEntry);
+			return 0;
+		}
+
+		DWORD64 GetProcAddress64(const char* funcName)
+		{
+		    SmartHandle hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, GetCurrentProcessId());
+			static DWORD64 hNtdll64 = FindModule64(hProcess, _T("ntdll.dll"), FALSE);
+			if (!hNtdll64) return 0;
+
+		    IMAGE_DOS_HEADER idh;
+			NTSTATUS status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)hNtdll64, (PVOID)&idh, sizeof(idh), NULL);
+			if (!NT_SUCCESS(status)) return 0;
+		    IMAGE_NT_HEADERS64 inh;
+		    status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + idh.e_lfanew), (PVOID)&inh, sizeof(inh), NULL);
+			if (!NT_SUCCESS(status)) return 0;
+		    IMAGE_DATA_DIRECTORY& idd = inh.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+		    if (!idd.VirtualAddress)return 0;
+
+		    IMAGE_EXPORT_DIRECTORY ied;
+		    status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + idd.VirtualAddress), (PVOID)&ied, sizeof(ied), NULL);
+			if (!NT_SUCCESS(status)) return 0;
+
+		    vector<DWORD> nameTable(ied.NumberOfNames);
+		    status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + ied.AddressOfNames), (PVOID)&nameTable[0], sizeof(DWORD) * ied.NumberOfNames, NULL);
+			if (!NT_SUCCESS(status)) return 0;
+
+		    // lazy search, there is no need to use binsearch for just one function
+		    for (DWORD i = 0; i < ied.NumberOfNames; ++i) {
+		    	string func(strlen(funcName) + 1, 0);
+			    status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + nameTable[i]), (PVOID)&func[0], strlen(funcName), NULL);
+				if (!NT_SUCCESS(status)) continue;
+
+		        if (strcmp(func.c_str(), funcName) == 0) {
+		    		vector<DWORD> rvaTable(ied.NumberOfFunctions);
+		    		status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + ied.AddressOfFunctions), (PVOID)&rvaTable[0], sizeof(DWORD) * ied.NumberOfFunctions, NULL);
+				    if (!NT_SUCCESS(status)) continue;
+		    		vector<WORD> ordTable(ied.NumberOfFunctions);
+		    		status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + ied.AddressOfNameOrdinals), (PVOID)&ordTable[0], sizeof(WORD) * ied.NumberOfFunctions, NULL);
+				    if (!NT_SUCCESS(status)) continue;
+		            return hNtdll64 + rvaTable[ordTable[i]];
+		        }
+		    }
+		    return 0;
+		}
+
+	#define _(a) __asm __emit (a)
+		__declspec(naked) DWORD64 FakeCall(DWORD64 func, ...)
+		{
+			_(0x55)_(0x8b)_(0xec)_(0x83)_(0xec)_(0x40)_(0x53)_(0x56)_(0x57)_(0x8b)_(0x45)_(0x10)_(0x0f)_(0x57)_(0xc0)_(0x89)
+			_(0x45)_(0xe0)_(0x8b)_(0x45)_(0x14)_(0x89)_(0x45)_(0xe4)_(0x8b)_(0x45)_(0x18)_(0x89)_(0x45)_(0xd8)_(0x8b)_(0x45)
+			_(0x1c)_(0x89)_(0x45)_(0xdc)_(0x8b)_(0x45)_(0x20)_(0x89)_(0x45)_(0xd0)_(0x8b)_(0x45)_(0x24)_(0x89)_(0x45)_(0xd4)
+			_(0x8b)_(0x45)_(0x28)_(0x89)_(0x45)_(0xc8)_(0x8b)_(0x45)_(0x2c)_(0x89)_(0x45)_(0xcc)_(0x8d)_(0x45)_(0x28)_(0x99)
+			_(0x83)_(0xc0)_(0x08)_(0x66)_(0x0f)_(0x13)_(0x45)_(0xe8)_(0x83)_(0xd2)_(0x00)_(0x89)_(0x45)_(0xc0)_(0x89)_(0x55)
+			_(0xc4)_(0xc7)_(0x45)_(0xf0)_(0x06)_(0x00)_(0x00)_(0x00)_(0xc7)_(0x45)_(0xf4)_(0x00)_(0x00)_(0x00)_(0x00)_(0xc7)
+			_(0x45)_(0xfc)_(0x00)_(0x00)_(0x00)_(0x00)_(0xc7)_(0x45)_(0xf8)_(0x00)_(0x00)_(0x00)_(0x00)_(0x66)_(0x8c)_(0x65)
+			_(0xf8)_(0xb8)_(0x2b)_(0x00)_(0x00)_(0x00)_(0x66)_(0x8e)_(0xe0)_(0x89)_(0x65)_(0xfc)_(0x83)_(0xe4)_(0xf0)_(0x6a)
+			_(0x33)_(0xe8)_(0x00)_(0x00)_(0x00)_(0x00)_(0x83)_(0x04)_(0x24)_(0x05)_(0xcb)_(0x48)_(0x8b)_(0x4d)_(0xe0)_(0x48)
+			_(0x8b)_(0x55)_(0xd8)_(0xff)_(0x75)_(0xd0)_(0x49)_(0x58)_(0xff)_(0x75)_(0xc8)_(0x49)_(0x59)_(0x48)_(0x8b)_(0x45)
+			_(0xf0)_(0xa8)_(0x01)_(0x75)_(0x03)_(0x83)_(0xec)_(0x08)_(0x57)_(0x48)_(0x8b)_(0x7d)_(0xc0)_(0x48)_(0x85)_(0xc0)
+			_(0x74)_(0x16)_(0x48)_(0x8d)_(0x7c)_(0xc7)_(0xf8)_(0x48)_(0x85)_(0xc0)_(0x74)_(0x0c)_(0xff)_(0x37)_(0x48)_(0x83)
+			_(0xef)_(0x08)_(0x48)_(0x83)_(0xe8)_(0x01)_(0xeb)_(0xef)_(0x48)_(0x83)_(0xec)_(0x20)_(0xff)_(0x55)_(0x08)_(0x48)
+			_(0x8b)_(0x4d)_(0xf0)_(0x48)_(0x8d)_(0x64)_(0xcc)_(0x20)_(0x5f)_(0x48)_(0x89)_(0x45)_(0xe8)_(0xe8)_(0x00)_(0x00)
+			_(0x00)_(0x00)_(0xc7)_(0x44)_(0x24)_(0x04)_(0x23)_(0x00)_(0x00)_(0x00)_(0x83)_(0x04)_(0x24)_(0x0d)_(0xcb)_(0x66)
+			_(0x8c)_(0xd8)_(0x66)_(0x8e)_(0xd0)_(0x8b)_(0x65)_(0xfc)_(0x66)_(0x8b)_(0x45)_(0xf8)_(0x66)_(0x8e)_(0xe0)_(0x8b)
+			_(0x45)_(0xe8)_(0x8b)_(0x55)_(0xec)_(0x5f)_(0x5e)_(0x5b)_(0x8b)_(0xe5)_(0x5d)_(0xc3)
+		}
+	#undef _
 
 		BOOL RemoteFreeLibrary64(HANDLE hProcess, PVOID64 modBaseAddr)
 		{
-			static DWORD64 hNtdll64 = GetModuleHandle64(L"ntdll.dll");
-			if(!hNtdll64) return FALSE;
-			static DWORD64 RtlCreateUserThread64 = GetProcAddress64(hNtdll64, "RtlCreateUserThread");
-			if(!RtlCreateUserThread64) return FALSE;
+			static DWORD64 RtlCreateUserThread64 = GetProcAddress64("RtlCreateUserThread");
+			if (!RtlCreateUserThread64) return FALSE;
+			static DWORD64 LdrUnloadDll64 = GetProcAddress64("LdrUnloadDll");
+			if (!LdrUnloadDll64) return FALSE;
 
-			SmartHandle hThread;
-			DWORD64 client_cid[2] = { 0 };
-			X64Call(RtlCreateUserThread64, 10,
+			return NT_SUCCESS((NTSTATUS)FakeCall(RtlCreateUserThread64,
 				(DWORD64)hProcess,        // ProcessHandle
 				(DWORD64)NULL,            // SecurityDescriptor
 				(DWORD64)FALSE,           // CreateSuspended
 				(DWORD64)0,               // StackZeroBits
-				(DWORD64)NULL,            // StackReserved
+				(DWORD64)0,               // StackReserved
 				(DWORD64)NULL,            // StackCommit
-				GetProcAddress64(hNtdll64, "LdrUnloadDll"),           // StartAddress
-				modBaseAddr,              // StartParameter
-				(DWORD64)&hThread,        // ThreadHandle
-				(DWORD64)&client_cid);    // ClientID
-			return INVALID_HANDLE_VALUE != hThread;
+				(DWORD64)LdrUnloadDll64,  // StartAddress
+				(DWORD64)modBaseAddr,     // StartParameter
+				(DWORD64)NULL,            // ThreadHandle
+				(DWORD64)NULL));          // ClientID
 		}
+
 #endif
 
 		BOOL RemoteUnmapViewOfFile(HANDLE hProcess, LPVOID lpBaseAddress)
