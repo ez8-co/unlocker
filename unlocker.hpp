@@ -219,16 +219,16 @@ namespace unlocker {
 		template <class T>
 		struct _UNICODE_STRING_T
 		{
-		    union
-		    {
-		        struct
-		        {
-		            WORD Length;
-		            WORD MaximumLength;
-		        };
-		        T dummy;
-		    };
-		    T Buffer;
+			union
+			{
+				struct
+				{
+					WORD Length;
+					WORD MaximumLength;
+				};
+				T dummy;
+			};
+			T Buffer;
 		};
 
 		typedef struct _OBJECT_NAME_INFORMATION {
@@ -377,7 +377,7 @@ namespace unlocker {
 				T dummy01;
 			};
 			_UNICODE_STRING_T<T> FullDllName;
-    		_UNICODE_STRING_T<T> BaseDllName;
+			_UNICODE_STRING_T<T> BaseDllName;
 			// omit unused fields
 		};
 
@@ -678,46 +678,46 @@ namespace unlocker {
 
 		DWORD64 GetProcAddress64(const char* funcName)
 		{
-		    SmartHandle hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, GetCurrentProcessId());
+			SmartHandle hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, GetCurrentProcessId());
 			static DWORD64 hNtdll64 = FindModule64(hProcess, _T("ntdll.dll"), FALSE);
 			if (!hNtdll64) return 0;
 
-		    IMAGE_DOS_HEADER idh;
+			IMAGE_DOS_HEADER idh;
 			NTSTATUS status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)hNtdll64, (PVOID)&idh, sizeof(idh), NULL);
 			if (!NT_SUCCESS(status)) return 0;
 
-		    IMAGE_NT_HEADERS64 inh;
-		    status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + idh.e_lfanew), (PVOID)&inh, sizeof(inh), NULL);
+			IMAGE_NT_HEADERS64 inh;
+			status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + idh.e_lfanew), (PVOID)&inh, sizeof(inh), NULL);
 			if (!NT_SUCCESS(status)) return 0;
 
-		    IMAGE_DATA_DIRECTORY& idd = inh.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
-		    if (!idd.VirtualAddress)return 0;
+			IMAGE_DATA_DIRECTORY& idd = inh.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+			if (!idd.VirtualAddress)return 0;
 
-		    IMAGE_EXPORT_DIRECTORY ied;
-		    status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + idd.VirtualAddress), (PVOID)&ied, sizeof(ied), NULL);
+			IMAGE_EXPORT_DIRECTORY ied;
+			status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + idd.VirtualAddress), (PVOID)&ied, sizeof(ied), NULL);
 			if (!NT_SUCCESS(status)) return 0;
 
-		    vector<DWORD> nameTable(ied.NumberOfNames);
-		    status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + ied.AddressOfNames), (PVOID)&nameTable[0], sizeof(DWORD) * ied.NumberOfNames, NULL);
+			vector<DWORD> nameTable(ied.NumberOfNames);
+			status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + ied.AddressOfNames), (PVOID)&nameTable[0], sizeof(DWORD) * ied.NumberOfNames, NULL);
 			if (!NT_SUCCESS(status)) return 0;
 
-		    for (DWORD i = 0; i < ied.NumberOfNames; ++i) {
-		    	string func(strlen(funcName) + 1, 0);
-			    status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + nameTable[i]), (PVOID)&func[0], strlen(funcName), NULL);
+			for (DWORD i = 0; i < ied.NumberOfNames; ++i) {
+				string func(strlen(funcName) + 1, 0);
+				status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + nameTable[i]), (PVOID)&func[0], strlen(funcName), NULL);
 				if (!NT_SUCCESS(status)) continue;
 
-		        if (strcmp(func.c_str(), funcName) == 0) {
-		    		vector<DWORD> rvaTable(ied.NumberOfFunctions);
-		    		status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + ied.AddressOfFunctions), (PVOID)&rvaTable[0], sizeof(DWORD) * ied.NumberOfFunctions, NULL);
+				if (strcmp(func.c_str(), funcName) == 0) {
+					vector<DWORD> rvaTable(ied.NumberOfFunctions);
+					status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + ied.AddressOfFunctions), (PVOID)&rvaTable[0], sizeof(DWORD) * ied.NumberOfFunctions, NULL);
 
-		    		vector<WORD> ordTable(ied.NumberOfFunctions);
-		    		status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + ied.AddressOfNameOrdinals), (PVOID)&ordTable[0], sizeof(WORD) * ied.NumberOfFunctions, NULL);
-				    if (!NT_SUCCESS(status)) continue;
+					vector<WORD> ordTable(ied.NumberOfFunctions);
+					status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + ied.AddressOfNameOrdinals), (PVOID)&ordTable[0], sizeof(WORD) * ied.NumberOfFunctions, NULL);
+					if (!NT_SUCCESS(status)) continue;
 
-		            return hNtdll64 + rvaTable[ordTable[i]];
-		        }
-		    }
-		    return 0;
+					return hNtdll64 + rvaTable[ordTable[i]];
+				}
+			}
+			return 0;
 		}
 
 	#define _(a) __asm __emit (a)
@@ -752,15 +752,15 @@ namespace unlocker {
 
 			return NT_SUCCESS((NTSTATUS)FakeCall(RtlCreateUserThread64,
 				(DWORD64)hProcess,  // ProcessHandle
-				(DWORD64)NULL,      // SecurityDescriptor
-				(DWORD64)FALSE,     // CreateSuspended
-				(DWORD64)0,         // StackZeroBits
-				(DWORD64)0,         // StackReserved
-				(DWORD64)NULL,      // StackCommit
-				LdrUnloadDll64,     // StartAddress
-				modBaseAddr,        // StartParameter
-				(DWORD64)NULL,      // ThreadHandle
-				(DWORD64)NULL));    // ClientID
+				(DWORD64)NULL,	  // SecurityDescriptor
+				(DWORD64)FALSE,	 // CreateSuspended
+				(DWORD64)0,		 // StackZeroBits
+				(DWORD64)0,		 // StackReserved
+				(DWORD64)NULL,	  // StackCommit
+				LdrUnloadDll64,	 // StartAddress
+				modBaseAddr,		// StartParameter
+				(DWORD64)NULL,	  // ThreadHandle
+				(DWORD64)NULL));	// ClientID
 		}
 #endif
 
@@ -837,9 +837,9 @@ namespace unlocker {
 			if (type != DLL_FILE && type != EXE_FILE)
 				return TRUE;
 			SmartHandle hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-	        PROCESSENTRY32 pe32 = { sizeof (pe32) };
-	        if (Process32First (hSnapshot, &pe32)) {
-	            do {
+			PROCESSENTRY32 pe32 = { sizeof (pe32) };
+			if (Process32First (hSnapshot, &pe32)) {
+				do {
 					// _tprintf_s(_T("%s [%u]\n"), pe32.szExeFile, pe32.th32ProcessID);
 					SmartHandle hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pe32.th32ProcessID);
 #ifndef _WIN64
@@ -880,9 +880,9 @@ namespace unlocker {
 #ifndef _WIN64
 					}
 #endif
-	            }
-	            while (Process32Next(hSnapshot, &pe32));
-	        }
+				}
+				while (Process32Next(hSnapshot, &pe32));
+			}
 			return TRUE;
 		}
 
@@ -912,9 +912,9 @@ namespace unlocker {
 							tstring mmfPath;
 							GetHandlePath(hDupHandle, mmfPath);
 							bool ok = CloseHandleWithProcess(it->first, *i);
-							SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), ok ? FOREGROUND_GREEN : FOREGROUND_RED);
+							// SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), ok ? FOREGROUND_GREEN : FOREGROUND_RED);
 							// _tprintf_s(_T("%s [%u](0x%lX) <mmf:%s> %s\n"), ok ? _T("OK") : _T("FAIL"), it->first, (ULONG)*i, mmfPath.c_str(), holderPath.c_str());
-							SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 7);
+							// SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 7);
 						}
 						else
 							// UnmapViewOfFile
@@ -923,9 +923,9 @@ namespace unlocker {
 				}
 				for (deque<HANDLE>::const_iterator i=it->second.openHandles.begin(); i!=it->second.openHandles.end(); ++i) {
 					bool ok = CloseHandleWithProcess(it->first, *i);
-					SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), ok ? FOREGROUND_GREEN : FOREGROUND_RED);
+					// SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), ok ? FOREGROUND_GREEN : FOREGROUND_RED);
 					// _tprintf_s(_T("%s [%u](0x%lX) %s\n"), ok ? _T("OK") : _T("FAIL"), it->first, (ULONG)*i, holderPath.c_str());
-					SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 7);
+					// SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 7);
 				}
 			}
 			UnholdPEFile(path);
