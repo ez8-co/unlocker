@@ -32,8 +32,6 @@ typedef std::basic_string<TCHAR, std::char_traits<TCHAR>, std::allocator<TCHAR> 
 #define NT_SUCCESS(Status)			(((NTSTATUS)(Status)) >= 0)
 #endif
 
-#define ProcessBasicInformation 0
-
 #ifndef UNICODE
 static string W2T(const wchar_t* wcs)
 {
@@ -399,6 +397,9 @@ namespace unlocker {
 		static HMODULE hKernel32 = LoadLibrary(_T("kernel32.dll"));
 
 #ifndef _WIN64
+
+		#define ProcessBasicInformation 0
+
 		typedef NTSTATUS(WINAPI *NT_WOW64_QUERY_INFORMATION_PROCESS64)(
 			HANDLE ProcessHandle, UINT32 ProcessInformationClass,
 			PVOID ProcessInformation, UINT32 ProcessInformationLength,
@@ -656,11 +657,11 @@ namespace unlocker {
 				if (!NT_SUCCESS(status)) continue;
 
 				_UNICODE_STRING_T<DWORD64>* name = isPath ? &head.FullDllName : &head.BaseDllName;
-				wstring dll_name((size_t)name->MaximumLength, 0);
-				status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)name->Buffer, (PVOID)&dll_name[0], name->MaximumLength, NULL);
+				wstring modName((size_t)name->MaximumLength, 0);
+				status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)name->Buffer, (PVOID)&modName[0], name->MaximumLength, NULL);
 				if (!NT_SUCCESS(status)) continue;
 
-				if (path == W2T(dll_name).c_str()) {
+				if (path == W2T(modName).c_str()) {
 					return head.DllBase;
 				}
 			} while (head.InLoadOrderLinks.Flink != LastEntry);
@@ -676,9 +677,11 @@ namespace unlocker {
 		    IMAGE_DOS_HEADER idh;
 			NTSTATUS status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)hNtdll64, (PVOID)&idh, sizeof(idh), NULL);
 			if (!NT_SUCCESS(status)) return 0;
+
 		    IMAGE_NT_HEADERS64 inh;
 		    status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + idh.e_lfanew), (PVOID)&inh, sizeof(inh), NULL);
 			if (!NT_SUCCESS(status)) return 0;
+
 		    IMAGE_DATA_DIRECTORY& idd = inh.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
 		    if (!idd.VirtualAddress)return 0;
 
@@ -690,7 +693,6 @@ namespace unlocker {
 		    status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + ied.AddressOfNames), (PVOID)&nameTable[0], sizeof(DWORD) * ied.NumberOfNames, NULL);
 			if (!NT_SUCCESS(status)) return 0;
 
-		    // lazy search, there is no need to use binsearch for just one function
 		    for (DWORD i = 0; i < ied.NumberOfNames; ++i) {
 		    	string func(strlen(funcName) + 1, 0);
 			    status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + nameTable[i]), (PVOID)&func[0], strlen(funcName), NULL);
@@ -699,10 +701,11 @@ namespace unlocker {
 		        if (strcmp(func.c_str(), funcName) == 0) {
 		    		vector<DWORD> rvaTable(ied.NumberOfFunctions);
 		    		status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + ied.AddressOfFunctions), (PVOID)&rvaTable[0], sizeof(DWORD) * ied.NumberOfFunctions, NULL);
-				    if (!NT_SUCCESS(status)) continue;
+
 		    		vector<WORD> ordTable(ied.NumberOfFunctions);
 		    		status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + ied.AddressOfNameOrdinals), (PVOID)&ordTable[0], sizeof(WORD) * ied.NumberOfFunctions, NULL);
 				    if (!NT_SUCCESS(status)) continue;
+
 		            return hNtdll64 + rvaTable[ordTable[i]];
 		        }
 		    }
@@ -751,7 +754,6 @@ namespace unlocker {
 				(DWORD64)NULL,            // ThreadHandle
 				(DWORD64)NULL));          // ClientID
 		}
-
 #endif
 
 		BOOL RemoteUnmapViewOfFile(HANDLE hProcess, LPVOID lpBaseAddress)
@@ -836,24 +838,29 @@ namespace unlocker {
 					BOOL isRemoteWow64 = FALSE;
 					IsWow64Process(hProcess, &isRemoteWow64);
 					if (is64BitOS && !isRemoteWow64) {
-						DWORD64 dllBaseAddr = FindModule64(hProcess, path);
-						if (dllBaseAddr) {
-							// 32 bit process inject 64 bit process
-							RemoteFreeLibrary64(hProcess, (PVOID64)dllBaseAddr);
+						DWORD64 modBaseAddr = FindModule64(hProcess, path);
+						if (modBaseAddr) {
+							if (type == EXE_FILE) {
+								TerminateProcess(hProcess, 1);
+								break;
+							}
+							else {
+								// 32 bit process inject 64 bit process
+								RemoteFreeLibrary64(hProcess, (PVOID64)modBaseAddr);
+							}
 						}
 					}
 					else {
 #endif
 						SmartHandle hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE32 | TH32CS_SNAPMODULE, pe32.th32ProcessID);
-						if (hSnap == INVALID_HANDLE_VALUE) {
+						if (hSnap == INVALID_HANDLE_VALUE)
 							continue;
-						}
 						MODULEENTRY32 mod = { sizeof(mod) };
 						if (Module32First(hSnap, &mod)) {
 							do {
 								if (!_tcsicmp(mod.szExePath, path.c_str())) {
 									if (type == EXE_FILE) {
-										TerminateProcess(hProcess, 0);
+										TerminateProcess(hProcess, 1);
 										break;
 									}
 									else {
