@@ -74,17 +74,6 @@ namespace unlocker {
 
 	typedef SmartHandleTmpl<> SmartHandle;
 
-	BOOL SetPrivilege(LPCTSTR lpszPrivilege, BOOL bEnablePrivilege)
-	{
-		SmartHandle hToken;
-		OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken);
-		LUID luid;
-		if (!LookupPrivilegeValue(NULL, lpszPrivilege, &luid)) return FALSE;
-		TOKEN_PRIVILEGES tp = {1, {luid, (DWORD)(bEnablePrivilege ? SE_PRIVILEGE_ENABLED : 0)}};
-		AdjustTokenPrivileges(hToken, FALSE, &tp, 0, (PTOKEN_PRIVILEGES) NULL, 0); 
-		return (GetLastError() == ERROR_SUCCESS);
-	}
-
 	class File;
 
 	class Path
@@ -133,7 +122,25 @@ namespace unlocker {
 		File(const tstring& path) : _path(path) {}
 		virtual operator Path() const { return _path; }
 		virtual const TCHAR* GetDevicePath() const { return _path.GetDevicePath(); }
-		virtual BOOL Unlock() { 
+		virtual BOOL Unlock() {
+			class PrivilegeHelper
+			{
+			public:
+				PrivilegeHelper() { SetPrivilege(SE_DEBUG_NAME, TRUE); }
+				~PrivilegeHelper() { SetPrivilege(SE_DEBUG_NAME, FALSE); }
+
+			private:
+				BOOL SetPrivilege(LPCTSTR lpszPrivilege, BOOL bEnablePrivilege)
+				{
+					SmartHandle hToken;
+					OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken);
+					LUID luid;
+					if (!LookupPrivilegeValue(NULL, lpszPrivilege, &luid)) return FALSE;
+					TOKEN_PRIVILEGES tp = { 1,{ luid, (DWORD)(bEnablePrivilege ? SE_PRIVILEGE_ENABLED : 0) } };
+					AdjustTokenPrivileges(hToken, FALSE, &tp, 0, (PTOKEN_PRIVILEGES)NULL, 0);
+					return (GetLastError() == ERROR_SUCCESS);
+				}
+			} helper;
 			return UnholdFile(_path);
 		}
 		virtual BOOL ForceDelete() {
@@ -417,6 +424,7 @@ namespace unlocker {
 
 		static NT_WOW64_QUERY_INFORMATION_PROCESS64 NtWow64QueryInformationProcess64 = (NT_WOW64_QUERY_INFORMATION_PROCESS64)GetProcAddress(hNtDll, "NtWow64QueryInformationProcess64");
 		static NT_WOW64_READ_VIRTUAL_MEMORY64 NtWow64ReadVirtualMemory64 = (NT_WOW64_READ_VIRTUAL_MEMORY64)GetProcAddress(hNtDll, "NtWow64ReadVirtualMemory64");
+
 #endif
 
 		BOOL Is64BitOS()
@@ -735,7 +743,7 @@ namespace unlocker {
 		}
 	#undef _
 
-		BOOL RemoteFreeLibrary64(HANDLE hProcess, PVOID64 modBaseAddr)
+		BOOL RemoteFreeLibrary64(HANDLE hProcess, DWORD64 modBaseAddr)
 		{
 			static DWORD64 RtlCreateUserThread64 = GetProcAddress64("RtlCreateUserThread");
 			if (!RtlCreateUserThread64) return FALSE;
@@ -743,16 +751,16 @@ namespace unlocker {
 			if (!LdrUnloadDll64) return FALSE;
 
 			return NT_SUCCESS((NTSTATUS)FakeCall(RtlCreateUserThread64,
-				(DWORD64)hProcess,        // ProcessHandle
-				(DWORD64)NULL,            // SecurityDescriptor
-				(DWORD64)FALSE,           // CreateSuspended
-				(DWORD64)0,               // StackZeroBits
-				(DWORD64)0,               // StackReserved
-				(DWORD64)NULL,            // StackCommit
-				(DWORD64)LdrUnloadDll64,  // StartAddress
-				(DWORD64)modBaseAddr,     // StartParameter
-				(DWORD64)NULL,            // ThreadHandle
-				(DWORD64)NULL));          // ClientID
+				(DWORD64)hProcess,  // ProcessHandle
+				(DWORD64)NULL,      // SecurityDescriptor
+				(DWORD64)FALSE,     // CreateSuspended
+				(DWORD64)0,         // StackZeroBits
+				(DWORD64)0,         // StackReserved
+				(DWORD64)NULL,      // StackCommit
+				LdrUnloadDll64,     // StartAddress
+				modBaseAddr,        // StartParameter
+				(DWORD64)NULL,      // ThreadHandle
+				(DWORD64)NULL));    // ClientID
 		}
 #endif
 
@@ -832,7 +840,7 @@ namespace unlocker {
 	        PROCESSENTRY32 pe32 = { sizeof (pe32) };
 	        if (Process32First (hSnapshot, &pe32)) {
 	            do {
-					_tprintf_s(_T("%s [%u]\n"), pe32.szExeFile, pe32.th32ProcessID);
+					// _tprintf_s(_T("%s [%u]\n"), pe32.szExeFile, pe32.th32ProcessID);
 					SmartHandle hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pe32.th32ProcessID);
 #ifndef _WIN64
 					BOOL isRemoteWow64 = FALSE;
@@ -846,7 +854,7 @@ namespace unlocker {
 							}
 							else {
 								// 32 bit process inject 64 bit process
-								RemoteFreeLibrary64(hProcess, (PVOID64)modBaseAddr);
+								RemoteFreeLibrary64(hProcess, modBaseAddr);
 							}
 						}
 					}
@@ -905,7 +913,7 @@ namespace unlocker {
 							GetHandlePath(hDupHandle, mmfPath);
 							bool ok = CloseHandleWithProcess(it->first, *i);
 							SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), ok ? FOREGROUND_GREEN : FOREGROUND_RED);
-							_tprintf_s(_T("%s [%u](0x%lX) <mmf:%s> %s\n"), ok ? _T("OK") : _T("FAIL"), it->first, (ULONG)*i, mmfPath.c_str(), holderPath.c_str());
+							// _tprintf_s(_T("%s [%u](0x%lX) <mmf:%s> %s\n"), ok ? _T("OK") : _T("FAIL"), it->first, (ULONG)*i, mmfPath.c_str(), holderPath.c_str());
 							SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 7);
 						}
 						else
@@ -916,7 +924,7 @@ namespace unlocker {
 				for (deque<HANDLE>::const_iterator i=it->second.openHandles.begin(); i!=it->second.openHandles.end(); ++i) {
 					bool ok = CloseHandleWithProcess(it->first, *i);
 					SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), ok ? FOREGROUND_GREEN : FOREGROUND_RED);
-					_tprintf_s(_T("%s [%u](0x%lX) %s\n"), ok ? _T("OK") : _T("FAIL"), it->first, (ULONG)*i, holderPath.c_str());
+					// _tprintf_s(_T("%s [%u](0x%lX) %s\n"), ok ? _T("OK") : _T("FAIL"), it->first, (ULONG)*i, holderPath.c_str());
 					SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 7);
 				}
 			}
