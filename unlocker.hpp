@@ -644,6 +644,8 @@ namespace unlocker {
 
 		DWORD64 FindModule64(HANDLE hProcess, const tstring& path, BOOL isPath = TRUE)
 		{
+			if (!NtWow64QueryInformationProcess64 || !NtWow64ReadVirtualMemory64) return 0;
+
 			PROCESS_BASIC_INFORMATION64 pbi = { 0 };
 			NTSTATUS status = NtWow64QueryInformationProcess64(hProcess, ProcessBasicInformation, &pbi, sizeof(pbi), NULL);
 			if (!NT_SUCCESS(status)) return 0;
@@ -669,9 +671,8 @@ namespace unlocker {
 				status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)name->Buffer, (PVOID)&modName[0], name->MaximumLength, NULL);
 				if (!NT_SUCCESS(status)) continue;
 
-				if (path == W2T(modName).c_str()) {
+				if (path == W2T(modName).c_str())
 					return head.DllBase;
-				}
 			} while (head.InLoadOrderLinks.Flink != LastEntry);
 			return 0;
 		}
@@ -680,7 +681,8 @@ namespace unlocker {
 		{
 			SmartHandle hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, GetCurrentProcessId());
 			static DWORD64 hNtdll64 = FindModule64(hProcess, _T("ntdll.dll"), FALSE);
-			if (!hNtdll64) return 0;
+
+			if (!hNtdll64 || !NtWow64ReadVirtualMemory64) return 0;
 
 			IMAGE_DOS_HEADER idh;
 			NTSTATUS status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)hNtdll64, (PVOID)&idh, sizeof(idh), NULL);
@@ -751,16 +753,16 @@ namespace unlocker {
 			if (!LdrUnloadDll64) return FALSE;
 
 			return NT_SUCCESS((NTSTATUS)FakeCall(RtlCreateUserThread64,
-				(DWORD64)hProcess,  // ProcessHandle
+				(DWORD64)hProcess,// ProcessHandle
 				(DWORD64)NULL,	  // SecurityDescriptor
-				(DWORD64)FALSE,	 // CreateSuspended
-				(DWORD64)0,		 // StackZeroBits
-				(DWORD64)0,		 // StackReserved
+				(DWORD64)FALSE,	  // CreateSuspended
+				(DWORD64)0,		  // StackZeroBits
+				(DWORD64)0,		  // StackReserved
 				(DWORD64)NULL,	  // StackCommit
-				LdrUnloadDll64,	 // StartAddress
-				modBaseAddr,		// StartParameter
+				LdrUnloadDll64,	  // StartAddress
+				modBaseAddr,	  // StartParameter
 				(DWORD64)NULL,	  // ThreadHandle
-				(DWORD64)NULL));	// ClientID
+				(DWORD64)NULL));  // ClientID
 		}
 #endif
 
@@ -834,8 +836,8 @@ namespace unlocker {
 		BOOL UnholdPEFile(const tstring& path)
 		{
 			FILE_TYPE type = CheckFileType(path);
-			if (type != DLL_FILE && type != EXE_FILE)
-				return TRUE;
+			if (type != DLL_FILE && type != EXE_FILE) return TRUE;
+
 			SmartHandle hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 			PROCESSENTRY32 pe32 = { sizeof (pe32) };
 			if (Process32First (hSnapshot, &pe32)) {
