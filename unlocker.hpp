@@ -64,7 +64,7 @@ namespace unlocker {
 		operator F*() const {return (F*)_handle;}
 		T* operator&() {return &_handle;}
 		T operator=(T handle) {
-			if (_handle) Closer(_handle);
+			if (_handle != handle && _handle) Closer(_handle);
 			return _handle = handle;
 		}
 
@@ -168,28 +168,26 @@ namespace unlocker {
 				SmartHandleTmpl<HANDLE, FindClose> hSearch = FindFirstFile(Path::Combine(dir.GetDevicePath(), _T("*")).c_str(), &fd);
 				if (hSearch == INVALID_HANDLE_VALUE) // try to examine root directory
 					hSearch = FindFirstFile(Path::Combine(dir, _T("*")).c_str(), &fd);
-				if (hSearch != INVALID_HANDLE_VALUE) {
-					INT subDirCnt = 0;
-					do {
-						if (!_tcscmp(fd.cFileName, _T(".")) || !_tcscmp(fd.cFileName, _T("..")))
-							continue;
-						else if (fd.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY)) {
-							++subDirCnt;
-							dirs.push_front(Dir(Path::Combine(dir, fd.cFileName)));
-						}
-						else {
-							if (!File(Path::Combine(dir, fd.cFileName)).Delete())
-								return FALSE;
-						}
-					} while (FindNextFile(hSearch, &fd) || GetLastError() != ERROR_NO_MORE_FILES);
-					if (!subDirCnt) {
-						if (!Dir(dir).DeleteDir())
-							return FALSE;
-						dirs.pop_front();
-					}
-				}
-				else
+				if (hSearch == INVALID_HANDLE_VALUE)
 					return FALSE;
+				INT subDirCnt = 0;
+				do {
+					if (!_tcscmp(fd.cFileName, _T(".")) || !_tcscmp(fd.cFileName, _T("..")))
+						continue;
+					else if (fd.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY)) {
+						++subDirCnt;
+						dirs.push_front(Dir(Path::Combine(dir, fd.cFileName)));
+					}
+					else {
+						if (!File(Path::Combine(dir, fd.cFileName)).Delete())
+							return FALSE;
+					}
+				} while (FindNextFile(hSearch, &fd) || GetLastError() != ERROR_NO_MORE_FILES);
+				if (!subDirCnt) {
+					if (!Dir(dir).DeleteDir())
+						return FALSE;
+					dirs.pop_front();
+				}
 			}
 			return TRUE;
 		}
@@ -217,12 +215,9 @@ namespace unlocker {
 
 	namespace {
 		template <class T>
-		struct _UNICODE_STRING_T
-		{
-			union
-			{
-				struct
-				{
+		struct _UNICODE_STRING_T {
+			union {
+				struct {
 					WORD Length;
 					WORD MaximumLength;
 				};
@@ -311,15 +306,13 @@ namespace unlocker {
 		} SECTION_BASIC_INFORMATION;
 
 		template <typename T>
-		struct _LIST_ENTRY_T
-		{
+		struct _LIST_ENTRY_T {
 			T Flink;
 			T Blink;
 		};
 
 		template <typename T>
-		struct _PEB_T
-		{
+		struct _PEB_T {
 			T dummy01;
 			T Mutant;
 			T ImageBaseAddress;
@@ -351,8 +344,7 @@ namespace unlocker {
 		} PROCESS_BASIC_INFORMATION32;
 
 		template <class T>
-		struct _PEB_LDR_DATA_T
-		{
+		struct _PEB_LDR_DATA_T {
 			DWORD Length;
 			DWORD Initialized;
 			T SsHandle;
@@ -364,15 +356,13 @@ namespace unlocker {
 		typedef _PEB_LDR_DATA_T<DWORD64> PEB_LDR_DATA64;
 
 		template <class T>
-		struct _LDR_DATA_TABLE_ENTRY_T
-		{
+		struct _LDR_DATA_TABLE_ENTRY_T {
 			_LIST_ENTRY_T<T> InLoadOrderLinks;
 			_LIST_ENTRY_T<T> InMemoryOrderLinks;
 			_LIST_ENTRY_T<T> InInitializationOrderLinks;
 			T DllBase;
 			T EntryPoint;
-			union
-			{
+			union {
 				DWORD SizeOfImage;
 				T dummy01;
 			};
@@ -807,8 +797,7 @@ namespace unlocker {
 			return found;
 		}
 
-		typedef enum FILE_TYPE
-		{
+		typedef enum FILE_TYPE {
 			UNKNOWN_FILE,
 			NORMAL_FILE,
 			EXE_FILE,
