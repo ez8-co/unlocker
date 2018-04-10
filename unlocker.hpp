@@ -33,16 +33,16 @@ typedef std::basic_string<TCHAR, std::char_traits<TCHAR>, std::allocator<TCHAR> 
 #endif
 
 #ifndef UNICODE
-static string W2T(const wchar_t* wcs)
-{
-	int len = ::WideCharToMultiByte(CP_ACP, 0, wcs, -1, NULL, 0, 0, 0);
-	string ret(len, 0);
-	VERIFY(0 != ::WideCharToMultiByte(CP_ACP, 0, wcs, -1, &ret[0], len, 0, 0));
-	ret.resize(len - 1);
-	return ret;
-}
+	static string _W2T(const wchar_t* wcs)
+	{
+		int len = ::WideCharToMultiByte(CP_ACP, 0, wcs, -1, NULL, 0, 0, 0);
+		string ret(len, 0);
+		VERIFY(0 != ::WideCharToMultiByte(CP_ACP, 0, wcs, -1, &ret[0], len, 0, 0));
+		ret.resize(len - 1);
+		return ret;
+	}
 #else
-#define W2T(str) wstring(str)
+	#define _W2T(str) wstring(str)
 #endif
 
 namespace unlocker {
@@ -402,11 +402,6 @@ namespace unlocker {
 			PVOID ProcessInformation, UINT32 ProcessInformationLength,
 			UINT32* ReturnLength);
 
-		typedef NTSTATUS(WINAPI *NT_QUERY_INFORMATION_PROCESS)(
-			HANDLE ProcessHandle, ULONG ProcessInformationClass,
-			PVOID ProcessInformation, UINT32 ProcessInformationLength,
-			UINT32* ReturnLength);
-
 		typedef NTSTATUS(WINAPI *NT_WOW64_READ_VIRTUAL_MEMORY64)(
 			HANDLE ProcessHandle, PVOID64 BaseAddress,
 			PVOID BufferData, UINT64 BufferLength,
@@ -511,7 +506,7 @@ namespace unlocker {
 
 			BOOL bRet = FALSE;
 			if (NT_SUCCESS(status)) {
-				path = W2T(pInfo->Name.Buffer ? pInfo->Name.Buffer : _T(""));
+				path = _W2T(pInfo->Name.Buffer ? pInfo->Name.Buffer : _T(""));
 				bRet = DevicePathToDrivePath(path);
 			}
 
@@ -632,7 +627,7 @@ namespace unlocker {
 
 #ifndef _WIN64
 
-		DWORD64 FindModule64(HANDLE hProcess, const tstring& path, BOOL isPath = TRUE)
+		DWORD64 GetModuleHandle64(HANDLE hProcess, const tstring& path, BOOL isPath = TRUE)
 		{
 			if (!NtWow64QueryInformationProcess64 || !NtWow64ReadVirtualMemory64) return 0;
 
@@ -661,7 +656,7 @@ namespace unlocker {
 				status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)name->Buffer, (PVOID)&modName[0], name->MaximumLength, NULL);
 				if (!NT_SUCCESS(status)) continue;
 
-				if (path == W2T(modName).c_str())
+				if (path == _W2T(modName).c_str())
 					return head.DllBase;
 			} while (head.InLoadOrderLinks.Flink != LastEntry);
 			return 0;
@@ -670,7 +665,7 @@ namespace unlocker {
 		DWORD64 GetProcAddress64(const char* funcName)
 		{
 			SmartHandle hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, GetCurrentProcessId());
-			static DWORD64 hNtdll64 = FindModule64(hProcess, _T("ntdll.dll"), FALSE);
+			static DWORD64 hNtdll64 = GetModuleHandle64(hProcess, _T("ntdll.dll"), FALSE);
 
 			if (!hNtdll64 || !NtWow64ReadVirtualMemory64) return 0;
 
@@ -712,7 +707,7 @@ namespace unlocker {
 			return 0;
 		}
 
-	#define _(a) __asm __emit (a)
+	#define _(x) __asm __emit (x)
 		__declspec(naked) DWORD64 FakeCall(DWORD64 func, ...)
 		{
 			_(0x55)_(0x8b)_(0xec)_(0x83)_(0xec)_(0x40)_(0x53)_(0x56)_(0x57)_(0x8b)_(0x45)_(0x10)_(0x0f)_(0x57)_(0xc0)_(0x89)
@@ -837,7 +832,7 @@ namespace unlocker {
 					BOOL isRemoteWow64 = FALSE;
 					IsWow64Process(hProcess, &isRemoteWow64);
 					if (is64BitOS && !isRemoteWow64) {
-						DWORD64 modBaseAddr = FindModule64(hProcess, path);
+						DWORD64 modBaseAddr = GetModuleHandle64(hProcess, path);
 						if (modBaseAddr) {
 							if (type == EXE_FILE) {
 								TerminateProcess(hProcess, 1);
