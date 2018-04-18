@@ -656,7 +656,7 @@ namespace unlocker {
 				status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)name->Buffer, (PVOID)&modName[0], name->MaximumLength, NULL);
 				if (!NT_SUCCESS(status)) continue;
 
-				if (path == _W2T(modName).c_str())
+				if (!_tcsicmp(path.c_str(), _W2T(modName).c_str()))
 					return head.DllBase;
 			} while (head.InLoadOrderLinks.Flink != LastEntry);
 			return 0;
@@ -689,19 +689,20 @@ namespace unlocker {
 			if (!NT_SUCCESS(status)) return 0;
 
 			for (DWORD i = 0; i < ied.NumberOfNames; ++i) {
-				string func(strlen(funcName) + 1, 0);
+				string func(strlen(funcName), 0);
 				status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + nameTable[i]), (PVOID)&func[0], strlen(funcName), NULL);
 				if (!NT_SUCCESS(status)) continue;
 
-				if (strcmp(func.c_str(), funcName) == 0) {
-					vector<DWORD> rvaTable(ied.NumberOfFunctions);
-					status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + ied.AddressOfFunctions), (PVOID)&rvaTable[0], sizeof(DWORD) * ied.NumberOfFunctions, NULL);
-
-					vector<WORD> ordTable(ied.NumberOfFunctions);
-					status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + ied.AddressOfNameOrdinals), (PVOID)&ordTable[0], sizeof(WORD) * ied.NumberOfFunctions, NULL);
+				if (func == funcName) {
+					WORD ord = 0;
+					status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + ied.AddressOfNameOrdinals + i * sizeof(WORD)), (PVOID)&ord, sizeof(WORD), NULL);
 					if (!NT_SUCCESS(status)) continue;
 
-					return hNtdll64 + rvaTable[ordTable[i]];
+					DWORD rva = 0;
+					status = NtWow64ReadVirtualMemory64(hProcess, (PVOID64)(hNtdll64 + ied.AddressOfFunctions + ord * sizeof(DWORD)), (PVOID)&rva, sizeof(DWORD), NULL);
+					if (!NT_SUCCESS(status)) continue;
+
+					return hNtdll64 + rva;
 				}
 			}
 			return 0;
