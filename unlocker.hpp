@@ -199,7 +199,7 @@ namespace unlocker {
 		}
 	};
 
-	File* Path::Exists(const tstring& path) {
+	inline File* Path::Exists(const tstring& path) {
 		Path filePath(path);
 		WIN32_FIND_DATA fd;
 		SmartHandleTmpl<HANDLE, FindClose> hSearch = FindFirstFile(filePath.GetDevicePath(), &fd);
@@ -898,7 +898,7 @@ namespace unlocker {
 							// if specific file occurred, close this handle
 							tstring mmfPath;
 							GetHandlePath(hDupHandle, mmfPath);
-							bool ok = CloseHandleWithProcess(it->first, *i);
+							BOOL ok = CloseHandleWithProcess(it->first, *i);
 							// SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), ok ? FOREGROUND_GREEN : FOREGROUND_RED);
 							// _tprintf_s(_T("%s [%u](0x%lX) <mmf:%s> %s\n"), ok ? _T("OK") : _T("FAIL"), it->first, (ULONG)*i, mmfPath.c_str(), holderPath.c_str());
 							// SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 7);
@@ -909,7 +909,7 @@ namespace unlocker {
 					}
 				}
 				for (deque<HANDLE>::const_iterator i=it->second.openHandles.begin(); i!=it->second.openHandles.end(); ++i) {
-					bool ok = CloseHandleWithProcess(it->first, *i);
+					BOOL ok = CloseHandleWithProcess(it->first, *i);
 					// SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), ok ? FOREGROUND_GREEN : FOREGROUND_RED);
 					// _tprintf_s(_T("%s [%u](0x%lX) %s\n"), ok ? _T("OK") : _T("FAIL"), it->first, (ULONG)*i, holderPath.c_str());
 					// SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 7);
