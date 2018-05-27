@@ -17,8 +17,9 @@ Aimed to be better than famous tool - unlocker @ Cedrick Collomb.
     * hang-up handle check without creating a mount of threads ([Robert Simpson's answer at stackoverflow.com](http://stackoverflow.com/questions/16127948/hang-on-ntquerysysteminformation-in-winxpx32-but-works-fine-in-win7x64))
 - [x] support operating files in UNC/Network drive
 - [x] support operations cross x64 and x86 modules
+- [x] support both UNICODE & non-UNICODE projects
 - [ ] support terminate some of the protected Ring3 processes
-- [ ] support all version of Visual C++ or Visual Studio (both UNICODE & non-UNICODE projects)
+- [ ] support all version of Visual C++ or Visual Studio
 - [ ] support all version of Windows OS
 
 ## How it works?
@@ -44,6 +45,7 @@ sys | CreateService/StartService | StopService/DeleteService
 
 * email : [orca.zhang@yahoo.com](mailto:orca.zhang@yahoo.com)
 * wechat : zw198932
+* QQ: 529055130
 
 ## References
 Thanks to following projects, in no particular order
