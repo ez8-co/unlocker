@@ -192,10 +192,25 @@ namespace unlocker {
 			return TRUE;
 		}
 		BOOL DeleteDir() {
+			static BOOL beforeVista = isBeforeVista();
 			// add backslash for unacceptable-name files
-			tstring path(Path::Combine(_path.GetDevicePath(), _T("")));
+			tstring path(_path.GetDevicePath());
+			// period ending for XP
+			if (beforeVista && path.length() && path[path.length() - 1] == '.') {
+				path += '.';
+				path += '\\';
+			}
+			else if (path.length() && path[path.length() - 1] != '\\')
+				path += '\\';
 			SetFileAttributes(path.c_str(), FILE_ATTRIBUTE_NORMAL);
 			return RemoveDirectory(path.c_str());
+		}
+
+	private:
+		BOOL isBeforeVista() {
+			OSVERSIONINFO osvi = {sizeof(OSVERSIONINFO)};
+			GetVersionEx(&osvi);
+			return osvi.dwMajorVersion < 6;
 		}
 	};
 
