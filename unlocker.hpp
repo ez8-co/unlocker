@@ -11,6 +11,8 @@
 #include <tchar.h>
 #include <windows.h>
 
+#pragma warning(disable: 4996)
+
 #include <deque>
 #include <vector>
 #include <map>
