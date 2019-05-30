@@ -1,6 +1,7 @@
 # What is unlocker?
 
 [![license](https://img.shields.io/badge/license-MIT-brightgreen.svg?style=flat)](https://github.com/ez8-co/unlocker/blob/master/LICENSE)
+[![Mentioned in Awesome Go](https://awesome.re/mentioned-badge.svg)](https://github.com/ExpLife0011/awesome-windows-kernel-security-development#windows-system-programming)
 
 A header-only, fast, simple Ring3 unlocker library. 
 
