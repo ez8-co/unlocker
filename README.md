@@ -51,8 +51,8 @@ sys | CreateService/StartService | StopService/DeleteService
 ## References
 Thanks to following projects, in no particular order
 
-* [ncFindFileHandle.cpp @ 宇文莺语 (wang huan)](https://code.csdn.net/snippets/713440/)
 * [vmmap @ twpol](https://github.com/twpol/vmmap)
+* [Mixing x64 & x86 code @ Mr.Rewolf's article](http://blog.rewolf.pl/blog/?p=102)
 
 ## About author
 
